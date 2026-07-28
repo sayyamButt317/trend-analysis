@@ -72,6 +72,18 @@ class CompanySignals:
         }
 
 
+def normalize_profile_text(text: str | None) -> str:
+    if not text:
+        return ""
+    normalized = (
+        text.replace("\\r\\n", "\n")
+        .replace("\\n", "\n")
+        .replace("\\r", "\n")
+        .replace("\\t", "\t")
+    )
+    return normalized.strip()
+
+
 def _unique(items: list[str]) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
@@ -87,10 +99,29 @@ def _unique(items: list[str]) -> list[str]:
 def _extract_name_from_profile(profile: str, fallback: str | None = None) -> str | None:
     if fallback:
         return fallback.strip()
-    first_line = (profile or "").strip().splitlines()[0] if profile else ""
-    first_line = re.sub(r"^(company\s*&\s*team\s*)", "", first_line, flags=re.I).strip()
-    if first_line and len(first_line) <= 80:
-        return first_line
+
+    profile_text = normalize_profile_text(profile)
+    if not profile_text:
+        return None
+
+    lines = [line.strip() for line in profile_text.splitlines() if line.strip()]
+    for line in lines[:4]:
+        cleaned = re.sub(r"^(company\s*&\s*team\s*)", "", line, flags=re.I).strip()
+        if not cleaned:
+            continue
+        if re.fullmatch(r"[A-Z &/]+", cleaned) and "LLC" not in cleaned and "Inc" not in cleaned:
+            continue
+        if len(cleaned) <= 80:
+            return cleaned
+
+    prefix_match = re.match(
+        r"^([A-Za-z0-9][A-Za-z0-9 &.,'-]{1,70}?(?:\s+(?:LLC|Inc|Ltd|Corporation|Pvt\.?|L\.L\.C\.))?)",
+        profile_text,
+        re.I,
+    )
+    if prefix_match:
+        return prefix_match.group(1).strip()
+
     return fallback
 
 
@@ -140,7 +171,9 @@ def parse_company_profile(
     company: dict[str, Any] | None = None,
 ) -> CompanySignals:
     company = company or {}
-    profile_text = (profile or company.get("profile") or company.get("description") or "").strip()
+    profile_text = normalize_profile_text(
+        profile or company.get("profile") or company.get("description") or ""
+    )
 
     signals = CompanySignals(
         name=_extract_name_from_profile(profile_text, company.get("name")),
@@ -218,8 +251,10 @@ def parse_company_profile(
 
 
 def merge_company_with_profile(company: dict[str, Any]) -> dict[str, Any]:
-    signals = parse_company_profile(company.get("profile"), company=company)
+    profile_text = normalize_profile_text(company.get("profile") or company.get("description") or "")
+    signals = parse_company_profile(profile_text, company=company)
     merged = {**company}
+    merged["profile"] = profile_text or merged.get("profile")
     merged["name"] = merged.get("name") or signals.name
     merged["description"] = merged.get("description") or signals.summary
     if not merged.get("website"):

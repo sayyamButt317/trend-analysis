@@ -192,6 +192,7 @@ def rank_competitors(
             "bio": (profile or {}).get("biography") or candidate.get("bio"),
             "followers": int((profile or {}).get("followers_count") or candidate.get("followers") or 0),
             "website": (profile or {}).get("website") or candidate.get("website"),
+            "profile_picture_url": (profile or {}).get("profile_picture_url"),
         }
         ranked.append(enriched)
 

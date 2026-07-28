@@ -2,7 +2,10 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
-from agents.trend.services.company_profile_parser import merge_company_with_profile
+from agents.trend.services.company_profile_parser import (
+    merge_company_with_profile,
+    normalize_profile_text,
+)
 
 
 SUPPORTED_MEDIA_TYPES = ("Reels", "Carousel", "Image", "Video")
@@ -55,7 +58,7 @@ class CompetitorAnalysisRequest(BaseModel):
     @field_validator("company_data", "region")
     @classmethod
     def _strip_text(cls, value: str) -> str:
-        text = (value or "").strip()
+        text = normalize_profile_text(value)
         if not text:
             raise ValueError("Value cannot be empty")
         return text

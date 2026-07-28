@@ -16,3 +16,8 @@ tavily-python==0.7.26
 # Agent orchestration
 langgraph==1.2.9
 langchain-core==1.5.1
+
+
+# Database
+supabase==2.15.0
+psycopg2-binary==2.9.10

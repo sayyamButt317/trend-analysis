@@ -33,15 +33,19 @@ async def DiscoverCompetitorsNode(state: TrendState) -> TrendState:
     filters = config.get("filters") or config
 
     company_name = (company.get("name") or config.get("company_name") or "").strip()
-    if not company_name:
+    manual_inputs = _manual_competitor_inputs(config, filters)
+    manual_mode = bool(manual_inputs)
+
+    if not company_name and not manual_mode:
         state["error"] = "Company name is required for competitor analysis."
         resetDiscoveryState(state)
         return state
 
+    if not company_name:
+        company_name = "Your company"
+
     competitor_limit = int(filters.get("competitor_limit") or config.get("competitor_limit") or 10)
     region = filters.get("region") or config.get("region")
-    manual_inputs = _manual_competitor_inputs(config, filters)
-    manual_mode = bool(manual_inputs)
 
     if manual_mode:
         candidates, resolve_warnings = await resolve_manual_competitors(
@@ -160,6 +164,7 @@ async def DiscoverCompetitorsNode(state: TrendState) -> TrendState:
                     "bio": profile.get("biography") or candidate.get("bio"),
                     "followers": int(profile.get("followers_count") or candidate.get("followers") or 0),
                     "website": profile.get("website") or candidate.get("website"),
+                    "profile_picture_url": profile.get("profile_picture_url"),
                 }
             )
     else:

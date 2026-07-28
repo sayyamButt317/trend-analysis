@@ -52,4 +52,32 @@ class Config(BaseModel):
     LOGO_DEV_SECRET_KEY: str = Field(default=os.getenv("LOGO_DEV_SECRET_KEY"))
     TRAVILY_API_KEY: str = Field(default=os.getenv("TRAVILY_API_KEY"))
 
+    SUPABASE_URL: str = Field(default=os.getenv("SUPABASE_URL"))
+    SUPABASE_KEY: str = Field(default=os.getenv("SUPABASE_KEY"))
+    SUPABASE_SERVICE_ROLE_KEY: str = Field(default=os.getenv("SUPABASE_SERVICE_ROLE_KEY"))
+    SUPABASE_ANON_KEY: str = Field(default=os.getenv("SUPABASE_ANON_KEY"))
+    SUPABASE_TABLE_PROMPTS: str = Field(
+        default=os.getenv("SUPABASE_TABLE_PROMPTS") or "prompts"
+    )
+    SUPABASE_TABLE_ANALYSIS: str = Field(
+        default=os.getenv("SUPABASE_TABLE_ANALYSIS") or "analysis"
+    )
+
+
 config = Config()
+
+
+def resolve_supabase_api_key() -> str:
+    """Prefer service role for server-side writes; fall back to legacy JWT keys."""
+    for candidate in (
+        config.SUPABASE_SERVICE_ROLE_KEY,
+        config.SUPABASE_KEY,
+        config.SUPABASE_ANON_KEY,
+    ):
+        key = (candidate or "").strip()
+        if not key:
+            continue
+        if key.startswith("sb_publishable_"):
+            continue
+        return key
+    return ""
