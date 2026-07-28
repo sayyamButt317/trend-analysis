@@ -4,6 +4,7 @@ from agents.competitor.invoke.competitor_invoke import competitorAnalysisAgent
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
 from service.Competitor.analysis_details import (
     create_competitor_report,
+    get_competitor_analytics,
     get_stored_report,
     list_stored_competitors,
     list_stored_content,
@@ -24,6 +25,23 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):
     return await competitorAnalysisAgent(request)
+
+
+@router.get(
+    "/analytics",
+    summary="Show competitor analytics dashboard data",
+    description=(
+        "Returns a consolidated analytics view: overview, competitors, content breakdown, "
+        "hashtags, and market insights. Omit analysis_id to use the latest saved run."
+    ),
+)
+async def getAnalytics(
+    analysis_id: str | None = Query(
+        default=None,
+        description="Analysis UUID. If omitted, returns analytics for the most recent run.",
+    ),
+):
+    return await get_competitor_analytics(analysis_id)
 
 
 @router.get(

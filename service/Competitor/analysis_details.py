@@ -426,3 +426,144 @@ async def list_stored_hashtags(analysis_id: str | None = None) -> dict[str, Any]
         "analysis_count": len(analyses),
         **hashtag_data,
     }
+
+
+def _analysis_overview_item(row: dict[str, Any]) -> dict[str, Any]:
+    result = row.get("result") or {}
+    company = result.get("company") or {}
+    meta = result.get("meta") or {}
+    filters = result.get("filters_applied") or {}
+    return {
+        "analysis_id": str(row.get("id")),
+        "prompt_id": str(row.get("prompt_id")),
+        "created_at": row.get("created_at"),
+        "company_name": company.get("name"),
+        "region": filters.get("region"),
+        "competitor_count": int(result.get("competitor_count") or 0),
+        "post_count": int(result.get("post_count") or 0),
+        "status": meta.get("status"),
+        "summary": result.get("summary"),
+    }
+
+
+def _competitor_analytics_item(competitor: dict[str, Any]) -> dict[str, Any]:
+    strategy = competitor.get("content_strategy") or {}
+    return {
+        "username": competitor.get("username"),
+        "name": competitor.get("name"),
+        "followers": competitor.get("followers"),
+        "profile_url": competitor.get("profile_url"),
+        "profile_picture_url": competitor.get("profile_picture_url"),
+        "match_score": competitor.get("match_score"),
+        "post_count": strategy.get("post_count") or competitor.get("post_count") or 0,
+        "primary_format": strategy.get("primary_format"),
+        "primary_content_category": strategy.get("primary_content_category"),
+        "content_focus": strategy.get("content_focus"),
+        "avg_engagement_rate": strategy.get("avg_engagement_rate"),
+        "media_types": strategy.get("media_types") or [],
+        "content_categories": strategy.get("content_categories") or [],
+        "top_hashtags": strategy.get("top_hashtags") or [],
+    }
+
+
+def _content_analytics(result: dict[str, Any]) -> dict[str, Any]:
+    market = result.get("market_insights") or {}
+    media_counts: Counter[str] = Counter()
+    for competitor in result.get("competitors") or []:
+        for post in competitor.get("posts") or []:
+            media_type = post.get("media_type") or "Unknown"
+            media_counts[media_type] += 1
+
+    return {
+        "total_posts": int(result.get("post_count") or 0),
+        "by_media_type": [
+            {"type": media_type, "count": count}
+            for media_type, count in media_counts.most_common()
+        ],
+        "dominant_content_types": market.get("dominant_content_types") or [],
+        "dominant_content_categories": market.get("dominant_content_categories") or [],
+        "content_usage": market.get("content_usage") or {},
+        "top_posts": _top_posts(result, limit=5),
+    }
+
+
+def _build_analytics_payload(
+    row: dict[str, Any],
+    prompt: dict[str, Any] | None,
+    *,
+    recent_analyses: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    result = row.get("result") or {}
+    company = result.get("company") or {}
+    filters = result.get("filters_applied") or {}
+    market = result.get("market_insights") or {}
+    hashtag_data = _collect_hashtags([row])
+    analysis_id = str(row.get("id"))
+
+    competitors = [
+        _competitor_analytics_item(
+            _competitor_summary(
+                competitor,
+                analysis_id=analysis_id,
+                prompt_id=str(row.get("prompt_id")),
+                created_at=row.get("created_at"),
+                company_name=company.get("name"),
+            )
+        )
+        for competitor in result.get("competitors") or []
+    ]
+
+    return {
+        "analysis_id": analysis_id,
+        "prompt_id": str(row.get("prompt_id")),
+        "overview": {
+            "company_name": company.get("name") or (prompt or {}).get("company_name"),
+            "region": (prompt or {}).get("region") or filters.get("region"),
+            "platform": (result.get("meta") or {}).get("platform") or "instagram",
+            "matching_mode": result.get("matching_mode"),
+            "competitor_count": int(result.get("competitor_count") or len(competitors)),
+            "post_count": int(result.get("post_count") or 0),
+            "analysis_created_at": row.get("created_at"),
+            "summary": result.get("summary"),
+            "success": bool(result.get("success")),
+        },
+        "market_insights": {
+            "topics": market.get("topics") or [],
+            "dominant_themes": market.get("dominant_themes") or [],
+            "content_usage": market.get("content_usage") or {},
+        },
+        "competitors": competitors,
+        "content": _content_analytics(result),
+        "hashtags": {
+            "total_unique": hashtag_data["total_unique"],
+            "top_hashtags": hashtag_data["hashtags"][:15],
+        },
+        "recent_analyses": recent_analyses or [],
+    }
+
+
+async def get_competitor_analytics(analysis_id: str | None = None) -> dict[str, Any]:
+    """Return a dashboard-ready analytics payload from stored analysis data."""
+    _ensure_storage_configured()
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+
+    if not analyses:
+        return {
+            "success": True,
+            "analysis_id": analysis_id,
+            "message": "No analysis data found. Run POST /competitor-analysis/analyze first.",
+            "overview": None,
+            "competitors": [],
+            "content": None,
+            "hashtags": None,
+            "recent_analyses": [],
+        }
+
+    recent = [_analysis_overview_item(row) for row in analyses[:10]]
+    target = analyses[0]
+    prompt = await asyncio.to_thread(_fetch_prompt_sync, str(target.get("prompt_id")))
+
+    return {
+        "success": True,
+        **_build_analytics_payload(target, prompt, recent_analyses=recent),
+    }
