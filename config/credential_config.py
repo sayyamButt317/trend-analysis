@@ -62,6 +62,9 @@ class Config(BaseModel):
     SUPABASE_TABLE_ANALYSIS: str = Field(
         default=os.getenv("SUPABASE_TABLE_ANALYSIS") or "analysis"
     )
+    SUPABASE_TABLE_REPORTS: str = Field(
+        default=os.getenv("SUPABASE_TABLE_REPORTS") or "reports"
+    )
 
 
 config = Config()
