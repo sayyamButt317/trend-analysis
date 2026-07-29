@@ -1,9 +1,7 @@
 import logging
 import re
 from typing import Any
-
 from tavily import TavilyClient
-
 from agents.trend.services.competitor_intelligence import (
     CompetitorIntel,
     build_competitor_intelligence,

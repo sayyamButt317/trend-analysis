@@ -1,5 +1,7 @@
 import logging
 
+from agents.competitor.node.DiscoverCompetitors import DiscoverCompetitorsNode
+from agents.trend.Nodes.DiscoverWebTrends import DiscoverWebTrendsNode
 from agents.trend.services.instagram_discovery import (
     fetch_instagram_posts_for_usernames,
     fetch_seed_influencers,
@@ -10,10 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 def _reset_discovery_state(state: TrendState) -> None:
-    """Ensure no stale/partial data survives an error branch."""
     state["discovered_influencers"] = []
     state["discovered_posts"] = []
     state["raw_posts"] = []
+
+
+def _is_company_mode(config: dict) -> bool:
+    return config.get("agent_mode") == "company_trend" or bool(
+        config.get("company") or config.get("company_name") or config.get("company_profile")
+    )
+
+
+def _is_global_mode(config: dict) -> bool:
+    return config.get("agent_mode") == "global_trend"
 
 
 async def DiscoverContentNode(state: TrendState) -> TrendState:
@@ -25,7 +36,17 @@ async def DiscoverContentNode(state: TrendState) -> TrendState:
         _reset_discovery_state(state)
         return state
 
-    # --- Step 1: discover seed influencers ---
+    if _is_global_mode(config):
+        return await DiscoverWebTrendsNode(state)
+
+    if _is_company_mode(config):
+        logger.info(
+            "Company trend mode: discovering competitors for %s in %s",
+            config.get("company_name") or "company",
+            config.get("region") or (config.get("filters") or {}).get("region"),
+        )
+        return await DiscoverCompetitorsNode(state)
+
     try:
         usernames, discovered_influencers, discovery_source = await fetch_seed_influencers(
             country=config.get("country"),
@@ -42,11 +63,9 @@ async def DiscoverContentNode(state: TrendState) -> TrendState:
         return state
 
     if not usernames:
-        category_hint = f" in {config.get('category')}" if config.get("category") else ""
         state["error"] = (
-            f"No Instagram influencers found via live search{category_hint}. "
-            "Try United Arab Emirates or Saudi Arabia with a supported category: "
-            "Fashion, Beauty, Fitness, Food, Travel, Luxury, Lifestyle."
+            "No Instagram accounts found. Send an empty body for global trends today, "
+            "or provide company_data + region for niche trends."
         )
         _reset_discovery_state(state)
         return state
@@ -55,17 +74,10 @@ async def DiscoverContentNode(state: TrendState) -> TrendState:
     state["config"] = config
     state["discovered_influencers"] = discovered_influencers
 
-    logger.info(
-        "Discovering Instagram content from %s influencer(s) via %s",
-        len(usernames),
-        discovery_source,
-    )
-
     influencer_map = {
         item["username"]: item for item in discovered_influencers if item.get("username")
     }
 
-    # --- Step 2: fetch posts for discovered influencers ---
     try:
         posts = await fetch_instagram_posts_for_usernames(
             usernames,
@@ -73,23 +85,13 @@ async def DiscoverContentNode(state: TrendState) -> TrendState:
             delay_seconds=float(config.get("request_delay_seconds") or 1.0),
         )
     except Exception:
-        logger.exception("Failed to fetch Instagram posts for usernames=%s", usernames)
-        state["error"] = "Instagram post fetching failed due to an internal error. Check server logs."
+        logger.exception("Failed to fetch Instagram posts")
         state["discovered_posts"] = []
         state["raw_posts"] = []
         return state
 
-    logger.info(
-        "Collected %s posts from %s influencer(s)",
-        len(posts),
-        len(usernames),
-    )
-
     if not posts:
-        state["error"] = (
-            "Influencers were found but Instagram post media could not be fetched. "
-            "Check server logs for 'Instagram trend fetch failed for @username' lines and retry."
-        )
+        state["error"] = "Accounts were found but Instagram posts could not be fetched."
         state["discovered_posts"] = []
         state["raw_posts"] = []
         return state

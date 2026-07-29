@@ -1,7 +1,5 @@
 import logging
-
 from tavily import TavilyClient
-
 from config.credential_config import config
 from scrapper.instagram_finder.extractor import extract_username
 from scrapper.instagram_finder.validator import is_valid_instagram_username

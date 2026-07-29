@@ -3,24 +3,44 @@ from datetime import datetime, timezone
 from typing import Any
 
 from agents.trend.graph.trendgraph import trend_graph_app
+from agents.trend.schemas.trend_request import TrendDiscoveryRequest
+from agents.trend.services.trend_response import build_trend_response
 from agents.trend.state.trend_state import TrendState
+from db.trend_storage import save_trend_run
 
 
-async def trendInvoke(config: dict[str, Any] | None = None) -> TrendState:
+async def trendInvoke(
+    config: dict[str, Any] | TrendDiscoveryRequest | None = None,
+) -> dict[str, Any]:
     start_time = time.time()
-    initial_state: TrendState = {
-        "config": {
+
+    if isinstance(config, TrendDiscoveryRequest):
+        request = config
+        agent_config = request.to_agent_config()
+        company_payload = request.normalized_company()
+    elif isinstance(config, dict) and (config.get("company_data") or config.get("region")):
+        request = TrendDiscoveryRequest.model_validate(config)
+        agent_config = request.to_agent_config()
+        company_payload = request.normalized_company()
+    elif config is None or config == {}:
+        request = TrendDiscoveryRequest()
+        agent_config = request.to_agent_config()
+        company_payload = {}
+    elif isinstance(config, dict):
+        request = None
+        agent_config = {
             "platform": "instagram",
-            "country": "United Arab Emirates",
-            "category": None,
-            "seed_usernames": None,
-            "auto_discover": True,
-            "use_database": False,
-            "influencer_limit": 20,
-            "request_delay_seconds": 1.0,
-            "min_engagement_rate": 1.0,
-            **(config or {}),
-        },
+            "include_web_trends": True,
+            **config,
+        }
+        company_payload = agent_config.get("company") or {}
+    else:
+        request = TrendDiscoveryRequest()
+        agent_config = request.to_agent_config()
+        company_payload = {}
+
+    initial_state: TrendState = {
+        "config": agent_config,
         "discovered_influencers": [],
         "discovered_posts": [],
         "raw_posts": [],
@@ -35,46 +55,88 @@ async def trendInvoke(config: dict[str, Any] | None = None) -> TrendState:
         "viral_categories": [],
         "trend_groups": [],
         "trend_scores": [],
+        "content_mix": [],
+        "web_crawl": {},
+        "web_trends": {},
         "trend_summary": "",
     }
 
     try:
         final_state = await trend_graph_app.ainvoke(initial_state)
         post_count = len(final_state.get("processed_posts") or [])
-        has_error = bool(final_state.get("error"))
-        final_state["_meta"] = {
+        web_trends = final_state.get("web_trends") or {}
+        has_web = bool(
+            web_trends.get("hashtags")
+            or web_trends.get("reel_formats")
+            or web_trends.get("songs")
+        )
+        has_error = bool(final_state.get("error")) and not has_web and post_count == 0
+        final_config = final_state.get("config") or agent_config
+
+        meta = {
             "status": (
                 "success"
-                if not has_error and post_count > 0
-                else "partial" if post_count > 0 else "failed"
+                if not has_error and (post_count > 0 or has_web)
+                else "partial"
+                if post_count > 0 or has_web
+                else "failed"
             ),
             "duration_sec": round(time.time() - start_time, 3),
             "timestamp": datetime.now(timezone.utc).isoformat(),
-            "platform": final_state.get("config", {}).get("platform"),
-            "discovery_source": final_state.get("config", {}).get("discovery_source"),
+            "platform": final_config.get("platform"),
+            "discovery_source": final_config.get("discovery_source"),
+            "agent_mode": final_config.get("agent_mode") or (request.mode if request else "trend"),
         }
-        return {
-            "success": not has_error and post_count > 0,
-            "error": final_state.get("error"),
-            "country": final_state.get("config", {}).get("country"),
-            "category": final_state.get("config", {}).get("category"),
-            "discovery_source": final_state.get("config", {}).get("discovery_source"),
-            "discovered_influencers": final_state.get("discovered_influencers") or [],
-            "post_count": post_count,
-            "viral_posts": final_state.get("viral_posts") or [],
-            "viral_sounds": final_state.get("viral_sounds") or [],
-            "viral_categories": final_state.get("viral_categories") or [],
-            "trend_summary": final_state.get("trend_summary") or "",
-            "trend_scores": final_state.get("trend_scores") or [],
-            "saved_trend_id": final_state.get("saved_trend_id"),
-            "_meta": final_state.get("_meta"),
-        }
+
+        result = build_trend_response(
+            company=company_payload or final_config.get("company") or {},
+            config=final_config,
+            processed_posts=final_state.get("processed_posts") or [],
+            hashtags=final_state.get("hashtags") or [],
+            topics=final_state.get("topics") or [],
+            trend_scores=final_state.get("trend_scores") or [],
+            viral_posts=final_state.get("viral_posts") or [],
+            viral_sounds=final_state.get("viral_sounds") or [],
+            viral_categories=final_state.get("viral_categories") or [],
+            content_mix=final_state.get("content_mix") or [],
+            discovered_influencers=final_state.get("discovered_influencers") or [],
+            trend_summary=final_state.get("trend_summary") or "",
+            meta=meta,
+            web_trends=web_trends,
+            web_crawl=final_state.get("web_crawl") or {},
+            error=final_state.get("error") if has_error else None,
+        )
+
+        final_state["_meta"] = meta
+        final_state["competitor_strategies"] = result.get("competitor_strategies")
+        final_state["market_insights"] = result.get("market_insights")
+        final_state["company"] = result.get("company")
+        final_state["web_trends"] = web_trends
+
+        save_result = await save_trend_run(final_state)
+        result["saved_trend_id"] = save_result.get("trend_id")
+        if save_result.get("storage_error"):
+            result.setdefault("meta", {})["storage_error"] = save_result["storage_error"]
+        return result
     except Exception as exc:
-        return {
-            "error": str(exc),
-            "_meta": {
+        return build_trend_response(
+            company=company_payload,
+            config=agent_config,
+            processed_posts=[],
+            hashtags=[],
+            topics=[],
+            trend_scores=[],
+            viral_posts=[],
+            viral_sounds=[],
+            viral_categories=[],
+            content_mix=[],
+            discovered_influencers=[],
+            trend_summary="",
+            meta={
                 "status": "failed",
                 "duration_sec": round(time.time() - start_time, 3),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
+                "agent_mode": agent_config.get("agent_mode") or (request.mode if request else "trend"),
             },
-        }
+            error=str(exc),
+        )

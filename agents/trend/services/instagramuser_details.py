@@ -1,9 +1,7 @@
 import asyncio
 import logging
 import time
-
 import httpx
-
 from config.credential_config import config
 
 logger = logging.getLogger(__name__)

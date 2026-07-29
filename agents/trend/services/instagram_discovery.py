@@ -197,7 +197,7 @@ async def fetch_seed_influencers(
     auto_discover: bool = True,
     use_database: bool = False,
 ) -> tuple[list[str], list[dict], str]:
-    del use_database  # reserved for future DB-backed discovery
+    del use_database
     seed_usernames = normalize_instagram_usernames(seed_usernames)
     normalized_categories = normalize_categories(categories)
 

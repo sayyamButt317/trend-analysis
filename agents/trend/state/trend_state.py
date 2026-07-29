@@ -27,5 +27,8 @@ class TrendState(TypedDict, total=False):
     content_mix: list[dict[str, Any]]
     competitor_summary: str
 
+    web_crawl: dict[str, Any]
+    web_trends: dict[str, Any]
+
     error: Optional[str]
     _meta: dict[str, Any]

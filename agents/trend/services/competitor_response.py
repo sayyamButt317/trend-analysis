@@ -1,6 +1,5 @@
 from collections import Counter
 from typing import Any
-
 from agents.trend.services.content_analyzer import build_market_content_usage
 
 

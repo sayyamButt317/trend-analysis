@@ -65,13 +65,15 @@ class Config(BaseModel):
     SUPABASE_TABLE_REPORTS: str = Field(
         default=os.getenv("SUPABASE_TABLE_REPORTS") or "reports"
     )
+    SUPABASE_TABLE_TRENDS: str = Field(
+        default=os.getenv("SUPABASE_TABLE_TRENDS") or "trends"
+    )
 
 
 config = Config()
 
 
-def resolve_supabase_api_key() -> str:
-    """Prefer service role for server-side writes; fall back to legacy JWT keys."""
+def resolve_supabase_api_key() -> str: 
     for candidate in (
         config.SUPABASE_SERVICE_ROLE_KEY,
         config.SUPABASE_KEY,
