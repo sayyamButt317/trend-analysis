@@ -184,6 +184,8 @@ def build_trend_response(
         "competitor_count": len(discovered_influencers),
         "discovery_source": config.get("discovery_source"),
         "web_sources": (web_crawl or {}).get("sources") or config.get("web_sources") or [],
+        "warnings": (web_crawl or {}).get("warnings") or [],
+        "tavily_skipped": (web_crawl or {}).get("tavily_skipped"),
         "trending_hashtags": trending_hashtags,
         "trending_topics": trending_topics,
         "trending_reel_formats": trending_reel_formats,

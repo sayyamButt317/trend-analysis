@@ -4,11 +4,14 @@ import re
 from datetime import datetime, timezone
 from html import unescape
 from typing import Any
+
 import httpx
+
 from agents.trend.services.google_trend_fetcher import fetch_google_trends
 from agents.trend.services.web_trend_parser import parse_source_content
 from agents.trend.services.web_trend_sources import TAVILY_TREND_QUERIES, TREND_SOURCES
 from config.credential_config import config
+from scrapper.tavily_retry import is_tavily_unreachable_error
 
 logger = logging.getLogger(__name__)
 
@@ -34,10 +37,33 @@ async def _fetch_with_httpx(url: str, *, timeout: float = 20.0) -> str:
         return _html_to_text(response.text)
 
 
-def _fetch_with_tavily_extract(url: str) -> str:
+class _TavilySession:
+    """Skip Tavily after the first DNS/network failure in a crawl run."""
+
+    def __init__(self) -> None:
+        self.disabled = False
+        self.disable_reason: str | None = None
+
+    def mark_unreachable(self, exc: Exception) -> None:
+        if self.disabled:
+            return
+        self.disabled = True
+        self.disable_reason = str(exc)
+        logger.warning(
+            "Tavily unreachable (DNS/network). Continuing with Google Trends and direct HTTP only."
+        )
+
+
+def _fetch_with_tavily_extract(url: str, session: _TavilySession) -> str:
+    if session.disabled:
+        return ""
+
     api_key = (config.TRAVILY_API_KEY or "").strip()
     if not api_key:
+        session.disabled = True
+        session.disable_reason = "TRAVILY_API_KEY not configured"
         return ""
+
     try:
         from tavily import TavilyClient
 
@@ -47,15 +73,22 @@ def _fetch_with_tavily_extract(url: str) -> str:
             chunks = result.get("results") or []
             if chunks:
                 return chunks[0].get("raw_content") or chunks[0].get("content") or ""
-    except Exception:
-        logger.warning("Tavily extract failed for %s", url, exc_info=True)
+    except Exception as exc:
+        if is_tavily_unreachable_error(exc):
+            session.mark_unreachable(exc)
+        else:
+            logger.warning("Tavily extract failed for %s: %s", url, exc)
     return ""
 
 
-def _search_tavily_for_trends() -> list[dict[str, Any]]:
+def _search_tavily_for_trends(session: _TavilySession) -> list[dict[str, Any]]:
+    if session.disabled:
+        return []
+
     api_key = (config.TRAVILY_API_KEY or "").strip()
     if not api_key:
         return []
+
     try:
         from tavily import TavilyClient
 
@@ -64,6 +97,8 @@ def _search_tavily_for_trends() -> list[dict[str, Any]]:
         client = TavilyClient(api_key=api_key)
         pages: list[dict[str, Any]] = []
         for query in TAVILY_TREND_QUERIES[:3]:
+            if session.disabled:
+                break
             response = tavily_search_with_retry(
                 client,
                 query=query,
@@ -93,12 +128,15 @@ def _search_tavily_for_trends() -> list[dict[str, Any]]:
                     }
                 )
         return pages
-    except Exception:
-        logger.exception("Tavily trend search failed")
+    except Exception as exc:
+        if is_tavily_unreachable_error(exc):
+            session.mark_unreachable(exc)
+        else:
+            logger.warning("Tavily trend search failed: %s", exc)
         return []
 
 
-async def _fetch_source(source: dict[str, str]) -> dict[str, Any] | None:
+async def _fetch_source(source: dict[str, str], session: _TavilySession) -> dict[str, Any] | None:
     url = source["url"]
     name = source["name"]
     focus = source.get("focus") or ""
@@ -106,8 +144,9 @@ async def _fetch_source(source: dict[str, str]) -> dict[str, Any] | None:
     try:
         content = await _fetch_with_httpx(url)
     except Exception:
-        logger.warning("HTTP fetch failed for %s, trying Tavily extract", url)
-        content = await asyncio.to_thread(_fetch_with_tavily_extract, url)
+        if not session.disabled:
+            logger.debug("HTTP fetch failed for %s, trying Tavily extract", url)
+            content = await asyncio.to_thread(_fetch_with_tavily_extract, url, session)
 
     if not content or len(content) < 200:
         return None
@@ -119,8 +158,9 @@ async def _fetch_source(source: dict[str, str]) -> dict[str, Any] | None:
 
 
 async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, Any]:
-    """Crawl trend websites, Google Trends RSS, and Tavily search results."""
-    source_tasks = [_fetch_source(source) for source in TREND_SOURCES]
+    """Crawl trend websites, Google Trends RSS, and optional Tavily search results."""
+    tavily_session = _TavilySession()
+    source_tasks = [_fetch_source(source, tavily_session) for source in TREND_SOURCES]
     google_task = fetch_google_trends(region=region)
 
     html_pages, google_result = await asyncio.gather(
@@ -132,7 +172,10 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
     if google_result.get("parsed_page"):
         parsed_pages.append(google_result["parsed_page"])
 
-    tavily_pages = await asyncio.to_thread(_search_tavily_for_trends)
+    tavily_pages: list[dict[str, Any]] = []
+    if not tavily_session.disabled:
+        tavily_pages = await asyncio.to_thread(_search_tavily_for_trends, tavily_session)
+
     for page in tavily_pages:
         parsed_pages.append(
             parse_source_content(
@@ -145,14 +188,28 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
     if not parsed_pages:
         return {
             "success": False,
-            "error": "Could not fetch trend data from web sources. Check network or TRAVILY_API_KEY.",
+            "error": (
+                "Could not fetch trend data from any source. "
+                "Check internet connectivity (Google Trends RSS and blog URLs)."
+            ),
             "sources": [],
             "parsed_pages": [],
+            "tavily_skipped": tavily_session.disabled,
+            "tavily_skip_reason": tavily_session.disable_reason,
         }
 
     sources = [page.get("source") for page in parsed_pages]
     if google_result.get("sources"):
-        sources.extend(google_result["sources"])
+        for source in google_result["sources"]:
+            if source not in sources:
+                sources.append(source)
+
+    warnings: list[str] = []
+    if tavily_session.disabled:
+        warnings.append(
+            "Tavily was skipped (DNS/network unavailable). "
+            "Results use Google Trends RSS and direct website fetches."
+        )
 
     return {
         "success": True,
@@ -160,5 +217,8 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
         "parsed_pages": parsed_pages,
         "google_trends": google_result.get("trends") or [],
         "google_trend_geos": google_result.get("geo_codes") or [],
+        "tavily_skipped": tavily_session.disabled,
+        "tavily_skip_reason": tavily_session.disable_reason,
+        "warnings": warnings,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }

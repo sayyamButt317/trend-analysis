@@ -4,6 +4,24 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_NON_RETRYABLE_MARKERS = (
+    "getaddrinfo failed",
+    "failed to resolve",
+    "name resolution",
+    "network is unreachable",
+    "temporary failure in name resolution",
+    "nodename nor servname provided",
+)
+
+
+def is_tavily_unreachable_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _NON_RETRYABLE_MARKERS)
+
+
+def _is_non_retryable_error(exc: Exception) -> bool:
+    return is_tavily_unreachable_error(exc)
+
 
 def tavily_search_with_retry(
     client: Any,
@@ -20,6 +38,13 @@ def tavily_search_with_retry(
             return client.search(**search_kwargs)
         except Exception as exc:
             last_exc = exc
+            if _is_non_retryable_error(exc):
+                logger.warning(
+                    "Tavily unreachable (DNS/network); skipping search query=%r: %s",
+                    query_preview,
+                    exc,
+                )
+                return None
             if attempt < max_attempts:
                 logger.warning(
                     "Tavily search failed (attempt %s/%s) query=%r: %s",
