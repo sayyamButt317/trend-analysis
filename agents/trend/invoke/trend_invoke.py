@@ -75,6 +75,14 @@ async def trendInvoke(
             or web_trends.get("google_trends")
         )
         has_error = bool(final_state.get("error")) and not has_web and post_count == 0
+        company_analysis = final_state.get("company_analysis") or {}
+        has_company_analysis = bool(
+            company_analysis.get("instagram")
+            or final_state.get("company_posts")
+            or final_state.get("pain_points")
+        )
+        if has_company_analysis:
+            has_error = False
         final_config = final_state.get("config") or agent_config
 
         meta = {

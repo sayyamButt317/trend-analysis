@@ -27,15 +27,32 @@ PAIN_POINT_PATTERNS = (
 )
 
 
-def _normalize_linkedin_company_url(url_or_slug: str) -> str | None:
+LINKEDIN_URL_RE = re.compile(
+    r"(?:https?://)?(?:[\w.]+)\.?linkedin\.com/(company|in)/([A-Za-z0-9_-]+)/?",
+    re.I,
+)
+
+
+def _normalize_linkedin_url(url_or_slug: str) -> str | None:
     value = (url_or_slug or "").strip().rstrip("/")
     if not value:
         return None
     if "linkedin.com" in value:
+        match = LINKEDIN_URL_RE.search(value if value.startswith("http") else f"https://{value.lstrip('www.')}")
+        if match:
+            kind, slug = match.group(1).lower(), match.group(2)
+            return f"https://www.linkedin.com/{kind}/{slug}/"
         if "/company/" in value or "/in/" in value:
             return value if value.startswith("http") else f"https://www.{value.lstrip('www.')}"
         return None
     return f"https://www.linkedin.com/company/{value}/"
+
+
+def _linkedin_posts_path(linkedin_url: str) -> str:
+    normalized = linkedin_url.rstrip("/")
+    if "/in/" in normalized:
+        return f"{normalized}/recent-activity/all/"
+    return f"{normalized}/posts/"
 
 
 async def _resolve_handles_via_tavily(
@@ -77,9 +94,9 @@ async def _resolve_handles_via_tavily(
                         resolved["instagram_username"] = username
                         resolved["instagram_url"] = f"https://www.instagram.com/{username}/"
                         break
-                elif platform == "linkedin" and "/company/" in url:
-                    resolved["linkedin_url"] = _normalize_linkedin_company_url(url)
-                    match = re.search(r"/company/([^/?#]+)", url, re.I)
+                elif platform == "linkedin" and ("/company/" in url or "/in/" in url):
+                    resolved["linkedin_url"] = _normalize_linkedin_url(url)
+                    match = re.search(r"/(?:company|in)/([^/?#]+)", url, re.I)
                     if match:
                         resolved["linkedin_username"] = match.group(1)
                     break
@@ -98,7 +115,7 @@ async def resolve_company_social_handles(
     handles = extract_social_handles(profile_text)
     handles["instagram_username"] = handles.get("instagram_username") or company.get("instagram_username")
     handles["instagram_url"] = handles.get("instagram_url") or company.get("instagram_url")
-    handles["linkedin_url"] = _normalize_linkedin_company_url(
+    handles["linkedin_url"] = _normalize_linkedin_url(
         handles.get("linkedin_url") or company.get("linkedin_url") or company.get("linkedin_username") or ""
     )
     handles["linkedin_username"] = handles.get("linkedin_username") or company.get("linkedin_username")
@@ -230,7 +247,8 @@ async def _fetch_linkedin_posts_tavily(
     try:
         client = TavilyClient(api_key=api_key)
         if hasattr(client, "extract"):
-            extract_result = client.extract(urls=[linkedin_url.rstrip("/") + "/posts/"])
+            posts_path = _linkedin_posts_path(linkedin_url)
+            extract_result = client.extract(urls=[posts_path])
             for chunk in extract_result.get("results") or []:
                 content = chunk.get("raw_content") or chunk.get("content") or ""
                 if content and len(content) > 100:
@@ -282,7 +300,7 @@ async def _fetch_linkedin_posts_playwright(linkedin_url: str, *, limit: int = 10
     try:
         async with BrowserManager(headless=True) as browser:
             await login_with_credentials(browser.page, email, password)
-            posts_url = linkedin_url.rstrip("/") + "/posts/"
+            posts_url = _linkedin_posts_path(linkedin_url)
             await browser.page.goto(posts_url, wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(3)
             posts_data = await browser.page.evaluate(
@@ -325,7 +343,7 @@ async def fetch_linkedin_company_posts(
     *,
     limit: int = 10,
 ) -> list[dict[str, Any]]:
-    normalized = _normalize_linkedin_company_url(linkedin_url)
+    normalized = _normalize_linkedin_url(linkedin_url)
     if not normalized:
         return []
 

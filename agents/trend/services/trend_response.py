@@ -181,7 +181,13 @@ def build_trend_response(
         or web_trends.get("google_trends")
     )
     is_global = config.get("agent_mode") == "global_trend"
-    success = not error and (post_count > 0 or has_web)
+    has_company_analysis = bool(
+        company_analysis.get("instagram")
+        or company_posts
+        or pain_points
+        or company_analysis.get("detected_niche")
+    )
+    success = not error and (post_count > 0 or has_web or has_company_analysis)
 
     return {
         "success": success,
@@ -202,12 +208,25 @@ def build_trend_response(
         if company
         else None,
         "company_analysis": company_analysis or None,
+        "detected_niche": (
+            company_analysis.get("detected_niche")
+            or (company_analysis.get("instagram") or {}).get("detected_niche")
+            or config.get("detected_niche")
+        ),
+        "niche_keywords": (
+            (company_analysis.get("instagram") or {}).get("niche_keywords")
+            or config.get("niche_keywords")
+            or []
+        ),
         "company_posts": company_posts or [],
         "linkedin_posts": linkedin_posts or [],
         "pain_points": pain_points or company_analysis.get("pain_points") or [],
         "instagram_insights": company_analysis.get("instagram"),
+        "instagram_niche_analysis": company_analysis.get("instagram"),
+        "linkedin_pain_points": pain_points or company_analysis.get("pain_points") or [],
         "audience_needs": company_analysis.get("audience_needs") or [],
         "linkedin_content_themes": company_analysis.get("linkedin_content_themes") or [],
+        "analysis_warnings": company_analysis.get("warnings") or [],
         "summary": trend_summary,
         "post_count": post_count,
         "competitor_count": len(discovered_influencers),

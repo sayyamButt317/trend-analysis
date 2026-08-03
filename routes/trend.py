@@ -28,12 +28,23 @@ async def discoverTrendsToday():
 
 @router.post(
     "/discover",
-    summary="Discover Instagram trends",
+    summary="Company trend discovery (Instagram niche + LinkedIn pain points)",
     description=(
-        "Two modes:\n"
-        "- **Empty body** → global trends today from web sources\n"
-        "- **company_data + region** → resolves company Instagram/LinkedIn handles, "
-        "analyzes company posts + LinkedIn pain points, then finds niche competitor trends"
+        "Company mode — send **company_data**, **region**, and social handles:\n\n"
+        "```json\n"
+        "{\n"
+        '  "company_data": "Company name: Acme AI. Services: AI automation, custom software...",\n'
+        '  "region": "GCC",\n'
+        '  "instausername": "acmeai",\n'
+        '  "linkedinusername": "acme-ai"\n'
+        "}\n"
+        "```\n\n"
+        "**What it does:**\n"
+        "1. Parses company DNA (services, positioning, keywords)\n"
+        "2. Fetches & analyzes company **Instagram** posts → detected niche, content mix, hashtags\n"
+        "3. Fetches & analyzes **LinkedIn** posts → audience **pain points** + content themes\n"
+        "4. Discovers niche competitors and merges web trend signals\n\n"
+        "Empty body → global trends today from web sources."
     ),
 )
 async def discoverTrends(request: TrendDiscoveryRequest | None = None):

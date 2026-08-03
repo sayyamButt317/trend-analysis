@@ -36,6 +36,17 @@ async def AnalyzeCompanySocialNode(state: TrendState) -> TrendState:
         config["category"] = analysis["detected_category"]
         filters["industry"] = filters.get("industry") or analysis["detected_category"]
 
+    instagram_insights = analysis.get("instagram") or {}
+    niche_keywords = instagram_insights.get("niche_keywords") or []
+    if niche_keywords:
+        existing = list(filters.get("keywords") or [])
+        for keyword in niche_keywords:
+            if keyword and keyword not in existing:
+                existing.append(keyword)
+        filters["keywords"] = existing[:15]
+        config["niche_keywords"] = niche_keywords
+        config["detected_niche"] = instagram_insights.get("detected_niche") or analysis.get("detected_niche")
+
     config["company"] = company
     config["company_username"] = company.get("instagram_username")
     config["filters"] = filters
