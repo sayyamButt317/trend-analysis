@@ -14,6 +14,31 @@ logger = logging.getLogger(__name__)
 
 _PULLPUSH_LOCK = asyncio.Lock()
 
+
+class _PullPushCircuit:
+    """Disable PullPush after repeated 429s to avoid hammering the API."""
+
+    def __init__(self) -> None:
+        self._rate_limit_hits = 0
+        self.disabled = False
+        self.disable_reason: str | None = None
+
+    def is_available(self) -> bool:
+        return not self.disabled
+
+    def record_rate_limit(self) -> None:
+        self._rate_limit_hits += 1
+        if self._rate_limit_hits >= 2 and not self.disabled:
+            self.disabled = True
+            self.disable_reason = "PullPush rate limited (429)"
+            logger.warning(
+                "PullPush disabled after %s rate limits — Reddit will use Tavily site search",
+                self._rate_limit_hits,
+            )
+
+
+_pullpush_circuit = _PullPushCircuit()
+
 REDDIT_SUBREDDIT_RE = re.compile(r"reddit\.com/r/([^/?#]+)", re.IGNORECASE)
 PULLPUSH_SUBMISSION_URL = "https://api.pullpush.io/reddit/search/submission/"
 PULLPUSH_COMMENT_URL = "https://api.pullpush.io/reddit/search/comment/"
@@ -125,6 +150,7 @@ def x_source_label(url: str, base_name: str = "X") -> str:
 
 async def fetch_reddit_subreddit(
     source: dict[str, str],
+    session: Any = None,
     *,
     limit: int = 25,
 ) -> dict[str, Any] | None:
@@ -134,30 +160,51 @@ async def fetch_reddit_subreddit(
     if not match:
         return None
     subreddit = match.group(1)
+    focus = source.get("focus") or "topics,hashtags,culture"
 
-    posts = await _fetch_reddit_pullpush(subreddit, limit=limit)
-    if not posts:
-        posts = await _fetch_reddit_json_fallback(url, limit=limit)
-    if not posts:
-        logger.info("Reddit fetch empty for r/%s", subreddit)
-        return None
+    posts: list[dict[str, Any]] = []
+    if _pullpush_circuit.is_available():
+        posts = await _fetch_reddit_pullpush(subreddit, limit=limit)
 
-    parsed = parse_reddit_posts(posts, source=label, focus=source.get("focus") or "")
-    parsed["source"] = label
-    parsed["url"] = url
-    parsed["platform"] = "reddit"
-    parsed["post_count"] = len(posts)
-    return parsed
+    if posts:
+        parsed = parse_reddit_posts(posts, source=label, focus=focus)
+        parsed["source"] = label
+        parsed["url"] = url
+        parsed["platform"] = "reddit"
+        parsed["post_count"] = len(posts)
+        return parsed
+
+    if session is not None:
+        tavily_page = await _fetch_reddit_subreddit_via_tavily(
+            subreddit,
+            session,
+            label=label,
+            url=url,
+            focus=focus,
+        )
+        if tavily_page:
+            return tavily_page
+
+    logger.info("Reddit fetch empty for r/%s (PullPush unavailable, Tavily had no results)", subreddit)
+    return None
 
 
-async def _pullpush_get(url: str, params: dict[str, Any], *, retries: int = 2) -> list[dict[str, Any]]:
+async def _pullpush_get(url: str, params: dict[str, Any], *, retries: int = 1) -> list[dict[str, Any]]:
+    if not _pullpush_circuit.is_available():
+        return []
+
     headers = {"User-Agent": "TrendBot/1.0 (web trend aggregator)"}
     async with _PULLPUSH_LOCK:
-        for attempt in range(retries):
+        if not _pullpush_circuit.is_available():
+            return []
+        for attempt in range(retries + 1):
             try:
                 async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as client:
                     response = await client.get(url, params=params, headers=headers)
                     if response.status_code == 429:
+                        _pullpush_circuit.record_rate_limit()
+                        if not _pullpush_circuit.is_available():
+                            return []
                         wait = PULLPUSH_REQUEST_DELAY * (2**attempt) + 1.0
                         logger.debug("PullPush rate limited, retry in %.1fs", wait)
                         await asyncio.sleep(wait)
@@ -167,11 +214,69 @@ async def _pullpush_get(url: str, params: dict[str, Any], *, retries: int = 2) -
                     await asyncio.sleep(PULLPUSH_REQUEST_DELAY)
                     return data
             except Exception:
-                if attempt >= retries - 1:
+                if attempt >= retries:
                     logger.debug("PullPush request failed %s %s", url, params, exc_info=True)
                     return []
                 await asyncio.sleep(PULLPUSH_REQUEST_DELAY * (attempt + 1))
         return []
+
+
+async def _fetch_reddit_subreddit_via_tavily(
+    subreddit: str,
+    session: Any,
+    *,
+    label: str,
+    url: str,
+    focus: str,
+) -> dict[str, Any] | None:
+    query = f"site:reddit.com/r/{subreddit} trending social media marketing"
+    pages = await asyncio.to_thread(
+        fetch_platform_tavily_pages,
+        "Reddit",
+        [query],
+        session,
+        max_results=6,
+    )
+    if not pages:
+        return None
+
+    topics: list[dict[str, Any]] = []
+    hashtags: list[dict[str, Any]] = []
+    reel_formats: list[dict[str, Any]] = []
+    seen_topics: set[str] = set()
+    seen_tags: set[str] = set()
+    seen_formats: set[str] = set()
+
+    for page in pages:
+        for topic in page.get("topics") or []:
+            key = (topic.get("topic") or topic.get("key") or "").lower()
+            if key and key not in seen_topics:
+                seen_topics.add(key)
+                topics.append({**topic, "source": label})
+        for tag in page.get("hashtags") or []:
+            label_tag = tag.get("hashtag") or tag.get("tag")
+            if label_tag and label_tag not in seen_tags:
+                seen_tags.add(label_tag)
+                hashtags.append({**tag, "source": label})
+        for fmt in page.get("reel_formats") or []:
+            key = (fmt.get("name") or "").lower()
+            if key and key not in seen_formats:
+                seen_formats.add(key)
+                reel_formats.append({**fmt, "source": label})
+
+    if not (topics or hashtags or reel_formats):
+        return None
+
+    return {
+        "source": label,
+        "url": url,
+        "platform": "reddit",
+        "post_count": len(pages),
+        "topics": topics[:25],
+        "hashtags": hashtags[:20],
+        "reel_formats": reel_formats[:15],
+        "fetch_method": "tavily",
+    }
 
 
 def _normalize_pullpush_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -219,26 +324,23 @@ def _reddit_page_from_items(
 
 
 async def fetch_reddit_pullpush_boost() -> list[dict[str, Any]]:
+    if not _pullpush_circuit.is_available():
+        logger.info("PullPush boost skipped (circuit open)")
+        return []
+
     pages: list[dict[str, Any]] = []
-    consecutive_failures = 0
 
     async def _try_page(items: list[dict[str, Any]], **kwargs: Any) -> None:
-        nonlocal consecutive_failures
-        if not items:
-            consecutive_failures += 1
-            return
-        consecutive_failures = 0
         page = _reddit_page_from_items(items, **kwargs)
         if page:
             pages.append(page)
 
     for subreddit in REDDIT_PULLPUSH_EXTRA_SUBREDDITS:
-        if consecutive_failures >= 3:
-            logger.warning("PullPush rate limited — skipping remaining Reddit boost fetches")
+        if not _pullpush_circuit.is_available():
             break
         items = await _pullpush_get(
             PULLPUSH_SUBMISSION_URL,
-            {"subreddit": subreddit, "size": 20, "sort": "desc", "sort_type": "score"},
+            {"subreddit": subreddit, "size": 15, "sort": "desc", "sort_type": "score"},
         )
         await _try_page(
             items,
@@ -246,12 +348,12 @@ async def fetch_reddit_pullpush_boost() -> list[dict[str, Any]]:
             url=f"https://www.reddit.com/r/{subreddit}/",
         )
 
-    for keyword in REDDIT_PULLPUSH_KEYWORDS:
-        if consecutive_failures >= 3:
+    for keyword in REDDIT_PULLPUSH_KEYWORDS[:4]:
+        if not _pullpush_circuit.is_available():
             break
         items = await _pullpush_get(
             PULLPUSH_SUBMISSION_URL,
-            {"q": keyword, "size": 15, "sort": "desc", "sort_type": "score"},
+            {"q": keyword, "size": 12, "sort": "desc", "sort_type": "score"},
         )
         await _try_page(
             items,
@@ -259,21 +361,7 @@ async def fetch_reddit_pullpush_boost() -> list[dict[str, Any]]:
             url=f"{PULLPUSH_SUBMISSION_URL}?q={keyword}",
         )
 
-    for keyword in REDDIT_PULLPUSH_KEYWORDS[:4]:
-        if consecutive_failures >= 3:
-            break
-        items = await _pullpush_get(
-            PULLPUSH_COMMENT_URL,
-            {"q": keyword, "size": 12, "sort": "desc", "sort_type": "score"},
-        )
-        await _try_page(
-            items,
-            source=f"Reddit (comments: {keyword})",
-            url=f"{PULLPUSH_COMMENT_URL}?q={keyword}",
-            kind="comment",
-        )
-
-    logger.info("PullPush Reddit boost: %s pages (failures=%s)", len(pages), consecutive_failures)
+    logger.info("PullPush Reddit boost: %s pages", len(pages))
     return pages
 
 
@@ -288,23 +376,6 @@ async def _fetch_reddit_pullpush(subreddit: str, *, limit: int = 25) -> list[dic
         },
     )
     return _normalize_pullpush_items(items)
-
-
-async def _fetch_reddit_json_fallback(url: str, *, limit: int = 25) -> list[dict[str, Any]]:
-    json_url = f"{url.rstrip('/')}/hot.json?limit={limit}&raw_json=1"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; TrendBot/1.0; +https://github.com/techtimize/trend)",
-        "Accept": "application/json",
-    }
-    try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=20.0) as client:
-            response = await client.get(json_url, headers=headers)
-            if response.status_code != 200:
-                return []
-            payload = response.json()
-    except Exception:
-        return []
-    return (payload.get("data") or {}).get("children") or []
 
 
 async def fetch_x_source(
@@ -662,38 +733,42 @@ def fetch_platform_tavily_pages(
 
 
 async def fetch_social_platform_boost(session: Any) -> list[dict[str, Any]]:
-    reddit_pages = await fetch_reddit_pullpush_boost()
-    if len(reddit_pages) < 2:
-        reddit_pages.extend(
-            await asyncio.to_thread(
-                fetch_platform_tavily_pages,
-                "Reddit",
-                REDDIT_SITE_QUERIES,
-                session,
-                max_results=10,
-            )
-        )
-
-    linkedin_pages, x_pages = await asyncio.gather(
-        asyncio.to_thread(
-            fetch_platform_tavily_pages,
-            "LinkedIn",
-            LINKEDIN_SITE_QUERIES,
-            session,
-            max_results=10,
-        ),
-        asyncio.to_thread(
-            fetch_platform_tavily_pages,
-            "X",
-            X_SITE_QUERIES,
-            session,
-            max_results=10,
-        ),
+    reddit_task = fetch_reddit_pullpush_boost()
+    reddit_tavily_task = asyncio.to_thread(
+        fetch_platform_tavily_pages,
+        "Reddit",
+        REDDIT_SITE_QUERIES,
+        session,
+        max_results=10,
     )
+    linkedin_task = asyncio.to_thread(
+        fetch_platform_tavily_pages,
+        "LinkedIn",
+        LINKEDIN_SITE_QUERIES,
+        session,
+        max_results=10,
+    )
+    x_task = asyncio.to_thread(
+        fetch_platform_tavily_pages,
+        "X",
+        X_SITE_QUERIES,
+        session,
+        max_results=10,
+    )
+
+    reddit_pullpush, reddit_tavily, linkedin_pages, x_pages = await asyncio.gather(
+        reddit_task,
+        reddit_tavily_task,
+        linkedin_task,
+        x_task,
+    )
+    reddit_pages = reddit_pullpush + reddit_tavily
     boost_pages = reddit_pages + linkedin_pages + x_pages
     logger.info(
-        "Social platform boost: reddit=%s linkedin=%s x=%s",
+        "Social platform boost: reddit=%s (pullpush=%s tavily=%s) linkedin=%s x=%s",
         len(reddit_pages),
+        len(reddit_pullpush),
+        len(reddit_tavily),
         len(linkedin_pages),
         len(x_pages),
     )

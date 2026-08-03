@@ -148,9 +148,9 @@ def _search_tavily_for_trends(session: _TavilySession) -> list[dict[str, Any]]:
 async def _fetch_source(source: dict[str, str], session: _TavilySession) -> dict[str, Any] | None:
     source_type = classify_source(source)
     if source_type == "reddit":
-        return await fetch_reddit_subreddit(source)
+        return await fetch_reddit_subreddit(source, session)
     if source_type == "linkedin_reddit":
-        parsed = await fetch_reddit_subreddit(source)
+        parsed = await fetch_reddit_subreddit(source, session)
         if parsed:
             parsed["source"] = linkedin_source_label(source["url"])
             parsed["platform"] = "linkedin"
