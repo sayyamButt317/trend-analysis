@@ -1,6 +1,7 @@
 import logging
 
 from agents.competitor.node.DiscoverCompetitors import DiscoverCompetitorsNode
+from agents.trend.Nodes.AnalyzeCompanySocial import AnalyzeCompanySocialNode
 from agents.trend.Nodes.DiscoverWebTrends import DiscoverWebTrendsNode
 from agents.trend.services.instagram_discovery import (
     fetch_instagram_posts_for_usernames,
@@ -41,10 +42,11 @@ async def DiscoverContentNode(state: TrendState) -> TrendState:
 
     if _is_company_mode(config):
         logger.info(
-            "Company trend mode: discovering competitors for %s in %s",
-            config.get("company_name") or "company",
+            "Company trend mode: analyzing company social + discovering competitors for %s in %s",
+            config.get("company_name") or (config.get("company") or {}).get("name") or "company",
             config.get("region") or (config.get("filters") or {}).get("region"),
         )
+        state = await AnalyzeCompanySocialNode(state)
         return await DiscoverCompetitorsNode(state)
 
     try:

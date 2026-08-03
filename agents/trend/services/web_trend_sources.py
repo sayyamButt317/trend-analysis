@@ -1,14 +1,27 @@
 import re
 
 SOURCE_WEIGHTS = {
-    "Instagram Creators":1.0,
-    "Instagram Blog":0.95,
-    "Google Trends":0.95,
-    "Metricool":0.85,
-    "Sprout":0.85,
-    "Hootsuite":0.8,
-    "Later":0.75,
-    "Wikipedia":0.2,
+    "Instagram Creators": 1.0,
+    "Instagram Blog": 0.95,
+    "Google Trends": 0.95,
+
+    "Reddit": 0.90,
+    "X": 0.90,
+    "Facebook": 0.80,
+    "Facebook Creators": 0.85,
+
+    "Metricool": 0.85,
+    "Sprout Social": 0.85,
+    "Socialinsider": 0.85,
+    "Hootsuite": 0.80,
+    "Later": 0.75,
+    "SocialBee": 0.75,
+    "Buffer": 0.70,
+    "Awario": 0.70,
+
+    "LinkedIn": 0.88,
+
+    "Wikipedia": 0.20,
 }
 
 STOP_HASHTAGS = {
@@ -27,12 +40,23 @@ STOP_HASHTAGS = {
 # Official Google Trends RSS (daily trending searches)
 GOOGLE_TRENDS_RSS_URL = "https://trends.google.com/trending/rss?geo={geo}"
 
+# Default countries for global trend runs (top + rising queries)
+DEFAULT_GOOGLE_TREND_GEOS: list[str] = ["PK", "SA", "AE", "US", "GB"]
+
+GOOGLE_TREND_GEO_LABELS: dict[str, str] = {
+    "PK": "Pakistan",
+    "SA": "Saudi Arabia",
+    "AE": "United Arab Emirates",
+    "US": "United States",
+    "GB": "United Kingdom",
+}
+
 GOOGLE_TRENDS_GEOS: list[dict[str, str]] = [
-    {"geo": "US", "label": "United States", "priority": "high"},
-    {"geo": "AE", "label": "United Arab Emirates", "priority": "high"},
-    {"geo": "SA", "label": "Saudi Arabia", "priority": "high"},
-    {"geo": "GB", "label": "United Kingdom", "priority": "high"},
     {"geo": "PK", "label": "Pakistan", "priority": "high"},
+    {"geo": "SA", "label": "Saudi Arabia", "priority": "high"},
+    {"geo": "AE", "label": "United Arab Emirates", "priority": "high"},
+    {"geo": "US", "label": "United States", "priority": "high"},
+    {"geo": "GB", "label": "United Kingdom", "priority": "high"},
     {"geo": "IN", "label": "India", "priority": "medium"},
     {"geo": "CA", "label": "Canada", "priority": "medium"},
     {"geo": "AU", "label": "Australia", "priority": "medium"},
@@ -100,7 +124,7 @@ TREND_SOURCES: list[dict[str, str]] = [
     {
         "url": "https://metricool.com/trending-instagram-songs/",
         "name": "Metricool",
-        "focus": "songs,audio,reels",
+        "focus": "hashtags,reels",
         "priority": "high",
     },
     {
@@ -120,6 +144,88 @@ TREND_SOURCES: list[dict[str, str]] = [
         "name": "Later",
         "focus": "creator_trends,reels",
         "priority": "high",
+    },
+    # Reddit
+    {
+        "url": "https://www.reddit.com/r/Instagram/",
+        "name": "Reddit",
+        "focus": "creator_discussions,algorithm,trends,hashtags",
+        "priority": "high",
+    },
+    {
+        "url": "https://www.reddit.com/r/socialmedia/",
+        "name": "Reddit",
+        "focus": "social_media_trends,topics,hashtags",
+        "priority": "medium",
+    },
+    {
+        "url": "https://www.reddit.com/r/marketing/",
+        "name": "Reddit",
+        "focus": "marketing,viral_campaigns,topics",
+        "priority": "medium",
+    },
+    {
+        "url": "https://www.reddit.com/r/InstagramMarketing/",
+        "name": "Reddit",
+        "focus": "instagram_marketing,growth,hashtags",
+        "priority": "high",
+    },
+    {
+        "url": "https://www.reddit.com/r/InfluencerMarketing/",
+        "name": "Reddit",
+        "focus": "influencer_marketing,topics",
+        "priority": "high",
+    },
+    {
+        "url": "https://www.reddit.com/r/TikTok/",
+        "name": "Reddit",
+        "focus": "cross_platform_trends,topics",
+        "priority": "medium",
+    },
+    # X (Twitter)
+    {
+        "url": "https://x.com/explore/tabs/trending",
+        "name": "X",
+        "focus": "breaking_topics,hashtags,culture",
+        "priority": "high",
+    },
+    # Facebook
+    {
+        "url": "https://www.facebook.com/business/news",
+        "name": "Facebook",
+        "focus": "creator_updates,algorithm,topics",
+        "priority": "medium",
+    },
+    {
+        "url": "https://www.facebook.com/creators/",
+        "name": "Facebook Creators",
+        "focus": "creator_trends,reels,topics",
+        "priority": "medium",
+    },
+    # LinkedIn
+    {
+        "url": "https://www.linkedin.com/pulse/topic/marketing/",
+        "name": "LinkedIn",
+        "focus": "topics,hashtags,culture",
+        "priority": "high",
+    },
+    {
+        "url": "https://www.linkedin.com/pulse/topic/social-media/",
+        "name": "LinkedIn",
+        "focus": "social_media_trends,topics,hashtags",
+        "priority": "high",
+    },
+    {
+        "url": "https://www.linkedin.com/pulse/topic/branding/",
+        "name": "LinkedIn",
+        "focus": "marketing,topics,culture",
+        "priority": "medium",
+    },
+    {
+        "url": "https://www.reddit.com/r/linkedin/",
+        "name": "LinkedIn",
+        "focus": "creator_discussions,topics,hashtags",
+        "priority": "medium",
     },
     {
         "url": "https://blog.buffer.com/",
@@ -153,7 +259,6 @@ TREND_QUERY_TEMPLATES = [
     "{platform} {niche} viral posts {timeframe}",
     "{platform} {niche} trending hashtags {timeframe}",
     "{platform} {niche} trending reels {timeframe}",
-    "{platform} {niche} trending audio {timeframe}",
     "{platform} {niche} algorithm update",
     "{platform} {niche} creator trends",
     "{platform} {niche} trending formats",
@@ -177,7 +282,6 @@ TAVILY_TREND_QUERIES = [
     "Instagram viral reels today",
     "Instagram trending reel formats",
     "Instagram trending hashtags today",
-    "Instagram trending songs today",
     "Instagram algorithm update 2026",
     "Instagram trends UAE",
     "Instagram trends Saudi Arabia",
@@ -186,26 +290,78 @@ TAVILY_TREND_QUERIES = [
     "Google Trends rising searches today",
     "Google Trends UAE trending searches",
     "Google Trends Saudi Arabia trending searches",
+    # Reddit
+    "Reddit Instagram trends",
+    "Reddit viral Instagram reels",
+    "Reddit creator trends",
+    "Reddit social media trends",
+    # X
+    "X trending hashtags today",
+    "X trending topics today",
+    "X viral topics",
+    "X Instagram trends",
+    # Facebook
+    "Facebook Reels trends",
+    "Facebook creator trends",
+    "Facebook viral posts",
+    "Facebook algorithm update",
+    # LinkedIn
+    "LinkedIn trending topics today",
+    "LinkedIn viral posts marketing",
+    "LinkedIn creator trends",
+    "LinkedIn social media trends",
+    # Cross Platform
+    "social media trends this week",
+    "viral internet trends today",
+    "creator economy trends",
+]
+
+SOCIAL_QUERY_TEMPLATES = [
+    "Reddit {topic}",
+    "Reddit {niche} trend",
+    "Reddit {niche} discussion",
+
+    "X trending {topic}",
+    "X trending {country}",
+    "X viral {topic}",
+    "X hashtags {topic}",
+
+    "Facebook {topic}",
+    "Facebook creator trends",
+    "Facebook Reels {topic}",
+
+    "LinkedIn {topic}",
+    "LinkedIn trending {country}",
+    "LinkedIn {niche} trends",
+]
+
+SUPPORTED_SOCIAL_PLATFORMS = [
+    "Instagram",
+    "TikTok",
+    "YouTube",
+    "X",
+    "Reddit",
+    "Facebook",
+    "LinkedIn",
 ]
 
 
 def resolve_geos_for_region(region: str | None) -> list[str]:
-    """Return Google Trends geo codes for a user region (defaults to global set)."""
+    """Return Google Trends geo codes for a user region (defaults to PK, SA, AE, US, GB)."""
     if not region:
-        return [item["geo"] for item in GOOGLE_TRENDS_GEOS if item.get("priority") == "high"]
+        return list(DEFAULT_GOOGLE_TREND_GEOS)
 
     normalized = region.strip().lower()
     for part in re_split_region(normalized):
         if part in REGION_TO_GEO:
             return [REGION_TO_GEO[part]]
 
-    # Multi-region strings like "United States, GCC, MENA, Pakistan"
     geos: list[str] = []
     for part in re_split_region(normalized):
         geo = REGION_TO_GEO.get(part)
         if geo and geo not in geos:
             geos.append(geo)
-    return geos or ["US", "AE", "SA"]
+    return geos or list(DEFAULT_GOOGLE_TREND_GEOS)
 
 
 def re_split_region(text: str) -> list[str]:

@@ -4,11 +4,19 @@ import re
 from datetime import datetime, timezone
 from html import unescape
 from typing import Any
-
+from tavily import TavilyClient
+from scrapper.tavily_retry import tavily_search_with_retry
 import httpx
 
 from agents.trend.services.google_trend_fetcher import fetch_google_trends
-from agents.trend.services.web_trend_parser import parse_source_content
+from agents.trend.services.social_trend_fetcher import (
+    classify_source,
+    fetch_reddit_subreddit,
+    fetch_social_via_tavily_extract,
+    linkedin_source_label,
+    search_social_trends_via_tavily,
+)
+from agents.trend.services.web_trend_parser import build_source_breakdown, parse_source_content
 from agents.trend.services.web_trend_sources import TAVILY_TREND_QUERIES, TREND_SOURCES
 from config.credential_config import config
 from scrapper.tavily_retry import is_tavily_unreachable_error
@@ -38,8 +46,6 @@ async def _fetch_with_httpx(url: str, *, timeout: float = 20.0) -> str:
 
 
 class _TavilySession:
-    """Skip Tavily after the first DNS/network failure in a crawl run."""
-
     def __init__(self) -> None:
         self.disabled = False
         self.disable_reason: str | None = None
@@ -84,21 +90,17 @@ def _fetch_with_tavily_extract(url: str, session: _TavilySession) -> str:
 def _search_tavily_for_trends(session: _TavilySession) -> list[dict[str, Any]]:
     if session.disabled:
         return []
-
     api_key = (config.TRAVILY_API_KEY or "").strip()
     if not api_key:
         return []
-
     try:
-        from tavily import TavilyClient
-
-        from scrapper.tavily_retry import tavily_search_with_retry
-
         client = TavilyClient(api_key=api_key)
         pages: list[dict[str, Any]] = []
-        for query in TAVILY_TREND_QUERIES[:3]:
+        for query in TAVILY_TREND_QUERIES[:6]:
             if session.disabled:
                 break
+            if any(token in query.lower() for token in ("reddit", "facebook", "linkedin")) or query.lower().startswith("x "):
+                continue
             response = tavily_search_with_retry(
                 client,
                 query=query,
@@ -137,6 +139,25 @@ def _search_tavily_for_trends(session: _TavilySession) -> list[dict[str, Any]]:
 
 
 async def _fetch_source(source: dict[str, str], session: _TavilySession) -> dict[str, Any] | None:
+    source_type = classify_source(source)
+    if source_type == "reddit":
+        return await fetch_reddit_subreddit(source)
+    if source_type == "linkedin_reddit":
+        parsed = await fetch_reddit_subreddit(source)
+        if parsed:
+            parsed["source"] = linkedin_source_label(source["url"])
+            parsed["platform"] = "linkedin"
+        return parsed
+    if source_type in {"x", "facebook", "linkedin"}:
+        parsed = await fetch_social_via_tavily_extract(source, session)
+        if parsed:
+            if source_type == "linkedin":
+                parsed["source"] = linkedin_source_label(source["url"], source.get("name") or "LinkedIn")
+                parsed["platform"] = "linkedin"
+            return parsed
+        if source_type in {"x", "linkedin"}:
+            return None
+
     url = source["url"]
     name = source["name"]
     focus = source.get("focus") or ""
@@ -149,16 +170,18 @@ async def _fetch_source(source: dict[str, str], session: _TavilySession) -> dict
             content = await asyncio.to_thread(_fetch_with_tavily_extract, url, session)
 
     if not content or len(content) < 200:
+        if source_type == "facebook" and not session.disabled:
+            return await fetch_social_via_tavily_extract(source, session)
         return None
 
     parsed = parse_source_content(content, source=name, focus=focus)
     parsed["url"] = url
+    parsed["platform"] = source_type if source_type != "html" else "web"
     parsed["content_length"] = len(content)
     return parsed
 
 
 async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, Any]:
-    """Crawl trend websites, Google Trends RSS, and optional Tavily search results."""
     tavily_session = _TavilySession()
     source_tasks = [_fetch_source(source, tavily_session) for source in TREND_SOURCES]
     google_task = fetch_google_trends(region=region)
@@ -175,15 +198,18 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
     tavily_pages: list[dict[str, Any]] = []
     if not tavily_session.disabled:
         tavily_pages = await asyncio.to_thread(_search_tavily_for_trends, tavily_session)
+        social_pages = await asyncio.to_thread(search_social_trends_via_tavily, tavily_session)
+        tavily_pages.extend(social_pages)
 
     for page in tavily_pages:
-        parsed_pages.append(
-            parse_source_content(
-                page.get("content") or "",
-                source=page.get("source") or "Tavily",
-                focus="hashtags,topics,songs,reel_formats,culture",
-            )
+        parsed = parse_source_content(
+            page.get("content") or "",
+            source=page.get("source") or "Tavily",
+            focus=page.get("focus") or "hashtags,topics,reel_formats,culture",
         )
+        parsed["url"] = page.get("url")
+        parsed["platform"] = page.get("platform") or "tavily"
+        parsed_pages.append(parsed)
 
     if not parsed_pages:
         return {
@@ -198,11 +224,14 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
             "tavily_skip_reason": tavily_session.disable_reason,
         }
 
-    sources = [page.get("source") for page in parsed_pages]
+    sources = [page.get("source") for page in parsed_pages if page.get("source")]
     if google_result.get("sources"):
         for source in google_result["sources"]:
             if source not in sources:
                 sources.append(source)
+
+    source_breakdown = build_source_breakdown(parsed_pages)
+    platform_summary = _summarize_by_platform(source_breakdown)
 
     warnings: list[str] = []
     if tavily_session.disabled:
@@ -215,10 +244,42 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
         "success": True,
         "sources": sources,
         "parsed_pages": parsed_pages,
+        "source_breakdown": source_breakdown,
+        "platform_summary": platform_summary,
         "google_trends": google_result.get("trends") or [],
+        "google_trends_by_country": google_result.get("google_trends_by_country") or {},
+        "top_queries_by_country": google_result.get("top_queries_by_country") or {},
+        "rising_queries_by_country": google_result.get("rising_queries_by_country") or {},
         "google_trend_geos": google_result.get("geo_codes") or [],
         "tavily_skipped": tavily_session.disabled,
         "tavily_skip_reason": tavily_session.disable_reason,
         "warnings": warnings,
         "fetched_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _summarize_by_platform(breakdown: list[dict[str, Any]]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for entry in breakdown:
+        platform = entry.get("platform") or "web"
+        bucket = summary.setdefault(
+            platform,
+            {"source_count": 0, "total_items": 0, "sources": [], "highlights": []},
+        )
+        bucket["source_count"] += 1
+        bucket["total_items"] += int((entry.get("counts") or {}).get("total") or 0)
+        bucket["sources"].append(entry.get("source"))
+        for topic in entry.get("topics") or []:
+            label = topic.get("topic")
+            if label and label not in bucket["highlights"]:
+                bucket["highlights"].append(label)
+        for tag in entry.get("hashtags") or []:
+            label = tag.get("tag")
+            if label and label not in bucket["highlights"]:
+                bucket["highlights"].append(f"#{label}")
+        for fmt in entry.get("reel_formats") or []:
+            label = fmt.get("name")
+            if label and label not in bucket["highlights"]:
+                bucket["highlights"].append(label)
+        bucket["highlights"] = bucket["highlights"][:6]
+    return summary

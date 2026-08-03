@@ -1,6 +1,6 @@
 import logging
 from agents.trend.services.web_trend_crawler import crawl_instagram_web_trends
-from agents.trend.services.web_trend_parser import filter_for_niche, merge_parsed_results
+from agents.trend.services.web_trend_parser import attach_google_trends_by_country, filter_for_niche, merge_parsed_results
 from agents.trend.state.trend_state import TrendState
 
 logger = logging.getLogger(__name__)
@@ -34,21 +34,15 @@ async def ProcessWebTrendsNode(state: TrendState) -> TrendState:
         return state
 
     merged = merge_parsed_results(crawl.get("parsed_pages") or [])
+    merged = attach_google_trends_by_country(
+        merged,
+        (crawl.get("google_trends_by_country") or {}),
+    )
     if config.get("agent_mode") == "company_trend":
         merged = filter_for_niche(merged, _niche_keywords(config))
 
     state["web_crawl"] = crawl
     state["web_trends"] = merged
-    state["viral_sounds"] = [
-        {
-            "label": song.get("label"),
-            "title": song.get("title"),
-            "artist": song.get("artist"),
-            "source": song.get("source"),
-            "type": "trending_song",
-        }
-        for song in merged.get("songs") or []
-    ]
     state["viral_categories"] = [
         {
             "category": item.get("name"),
@@ -83,10 +77,19 @@ async def ProcessWebTrendsNode(state: TrendState) -> TrendState:
     config["web_sources"] = crawl.get("sources") or []
     state["config"] = config
     logger.info(
-        "Web trends merged: %s hashtags, %s reel formats, %s songs from %s sources",
+        "Web trends merged: %s hashtags, %s reel formats from %s sources",
         len(merged.get("hashtags") or []),
         len(merged.get("reel_formats") or []),
-        len(merged.get("songs") or []),
         len(crawl.get("sources") or []),
     )
+    for entry in merged.get("source_breakdown") or []:
+        counts = entry.get("counts") or {}
+        logger.info(
+            "  %s: %s items (topics=%s, hashtags=%s, formats=%s)",
+            entry.get("source"),
+            counts.get("total"),
+            counts.get("topics"),
+            counts.get("hashtags"),
+            counts.get("reel_formats"),
+        )
     return state

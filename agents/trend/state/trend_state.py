@@ -30,5 +30,10 @@ class TrendState(TypedDict, total=False):
     web_crawl: dict[str, Any]
     web_trends: dict[str, Any]
 
+    company_analysis: dict[str, Any]
+    company_posts: list[dict[str, Any]]
+    linkedin_posts: list[dict[str, Any]]
+    pain_points: list[dict[str, Any]]
+
     error: Optional[str]
     _meta: dict[str, Any]

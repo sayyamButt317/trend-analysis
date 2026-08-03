@@ -19,7 +19,7 @@ router = APIRouter(prefix="/trend-analysis", tags=["Trend Analysis"])
     summary="What's trending on Instagram today",
     description=(
         "No input required. Crawls trend websites (SocialBee, Metricool, Sprout Social, "
-        "Awario, Hootsuite, Wikipedia) and returns trending hashtags, Reel formats, songs, and topics."
+        "Awario, Hootsuite, Wikipedia, LinkedIn) and returns trending hashtags, Reel formats, topics, and Google Trends top/rising queries by country."
     ),
 )
 async def discoverTrendsToday():
@@ -32,7 +32,8 @@ async def discoverTrendsToday():
     description=(
         "Two modes:\n"
         "- **Empty body** → global trends today from web sources\n"
-        "- **company_data + region** → niche trends for your industry (competitor Instagram data + web enrichment)"
+        "- **company_data + region** → resolves company Instagram/LinkedIn handles, "
+        "analyzes company posts + LinkedIn pain points, then finds niche competitor trends"
     ),
 )
 async def discoverTrends(request: TrendDiscoveryRequest | None = None):

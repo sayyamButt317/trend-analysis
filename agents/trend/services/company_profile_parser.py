@@ -59,6 +59,10 @@ class CompanySignals:
     target_industries: list[str] = field(default_factory=list)
     keywords: list[str] = field(default_factory=list)
     summary: str | None = None
+    instagram_username: str | None = None
+    instagram_url: str | None = None
+    linkedin_url: str | None = None
+    linkedin_username: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,7 +73,77 @@ class CompanySignals:
             "target_industries": self.target_industries,
             "keywords": self.keywords,
             "summary": self.summary,
+            "instagram_username": self.instagram_username,
+            "instagram_url": self.instagram_url,
+            "linkedin_url": self.linkedin_url,
+            "linkedin_username": self.linkedin_username,
         }
+
+
+INSTAGRAM_PROFILE_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?instagram\.com/([A-Za-z0-9._]{2,30})/?",
+    re.I,
+)
+LINKEDIN_COMPANY_RE = re.compile(
+    r"(?:https?://)?(?:[\w.]+)\.?linkedin\.com/company/([A-Za-z0-9_-]+)/?",
+    re.I,
+)
+LINKEDIN_PERSON_RE = re.compile(
+    r"(?:https?://)?(?:[\w.]+)\.?linkedin\.com/in/([A-Za-z0-9_-]+)/?",
+    re.I,
+)
+INSTAGRAM_HANDLE_RE = re.compile(r"(?:instagram|ig)\s*[:@]\s*@?([A-Za-z0-9._]{2,30})", re.I)
+LINKEDIN_HANDLE_RE = re.compile(r"linkedin\s*[:@]\s*@?([A-Za-z0-9_-]{2,100})", re.I)
+
+INSTAGRAM_RESERVED = frozenset(
+    {"p", "reel", "reels", "tv", "explore", "popular", "stories", "accounts", "about"}
+)
+
+
+def extract_social_handles(text: str) -> dict[str, str | None]:
+    profile_text = normalize_profile_text(text)
+    instagram_username: str | None = None
+    instagram_url: str | None = None
+    linkedin_url: str | None = None
+    linkedin_username: str | None = None
+
+    for match in INSTAGRAM_PROFILE_RE.finditer(profile_text):
+        handle = match.group(1).strip().lstrip("@").lower()
+        if handle not in INSTAGRAM_RESERVED:
+            instagram_username = handle
+            instagram_url = f"https://www.instagram.com/{handle}/"
+            break
+
+    if not instagram_username:
+        handle_match = INSTAGRAM_HANDLE_RE.search(profile_text)
+        if handle_match:
+            instagram_username = handle_match.group(1).strip().lstrip("@").lower()
+            instagram_url = f"https://www.instagram.com/{instagram_username}/"
+
+    for match in LINKEDIN_COMPANY_RE.finditer(profile_text):
+        slug = match.group(1).strip().strip("/")
+        linkedin_username = slug
+        linkedin_url = f"https://www.linkedin.com/company/{slug}/"
+        break
+
+    if not linkedin_url:
+        for match in LINKEDIN_PERSON_RE.finditer(profile_text):
+            slug = match.group(1).strip().strip("/")
+            linkedin_username = slug
+            linkedin_url = f"https://www.linkedin.com/in/{slug}/"
+            break
+
+    if not linkedin_username:
+        li_match = LINKEDIN_HANDLE_RE.search(profile_text)
+        if li_match:
+            linkedin_username = li_match.group(1).strip().strip("/")
+
+    return {
+        "instagram_username": instagram_username,
+        "instagram_url": instagram_url,
+        "linkedin_url": linkedin_url,
+        "linkedin_username": linkedin_username,
+    }
 
 
 def normalize_profile_text(text: str | None) -> str:
@@ -245,6 +319,12 @@ def parse_company_profile(
     signals.technologies = _unique(signals.technologies)
     signals.target_industries = _unique(signals.target_industries)
     signals.summary = _first_sentences(profile_text, count=2)
+
+    social = extract_social_handles(profile_text)
+    signals.instagram_username = social.get("instagram_username")
+    signals.instagram_url = social.get("instagram_url")
+    signals.linkedin_url = social.get("linkedin_url")
+    signals.linkedin_username = social.get("linkedin_username")
     return signals
 
 
@@ -271,4 +351,8 @@ def merge_company_with_profile(company: dict[str, Any]) -> dict[str, Any]:
     )
     merged["extracted_keywords"] = signals.keywords
     merged["company_signals"] = signals.to_dict()
+    merged["instagram_username"] = merged.get("instagram_username") or signals.instagram_username
+    merged["instagram_url"] = merged.get("instagram_url") or signals.instagram_url
+    merged["linkedin_url"] = merged.get("linkedin_url") or signals.linkedin_url
+    merged["linkedin_username"] = merged.get("linkedin_username") or signals.linkedin_username
     return merged

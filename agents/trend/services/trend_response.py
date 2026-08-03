@@ -123,9 +123,14 @@ def build_trend_response(
     meta: dict[str, Any],
     web_trends: dict[str, Any] | None = None,
     web_crawl: dict[str, Any] | None = None,
+    company_analysis: dict[str, Any] | None = None,
+    company_posts: list[dict[str, Any]] | None = None,
+    linkedin_posts: list[dict[str, Any]] | None = None,
+    pain_points: list[dict[str, Any]] | None = None,
     error: str | None = None,
 ) -> dict[str, Any]:
     web_trends = web_trends or {}
+    company_analysis = company_analysis or {}
     competitor_insights = build_competitor_strategies(content_mix, processed_posts)
     market_insights = build_market_content_usage(content_mix, processed_posts)
 
@@ -145,8 +150,22 @@ def build_trend_response(
     ][:15]
     if not trending_reel_formats:
         trending_reel_formats = web_trends.get("reel_formats") or viral_categories 
-    trending_songs = web_trends.get("songs") or viral_sounds
     google_trends = web_trends.get("google_trends") or []
+    google_trends_by_country = (
+        web_trends.get("google_trends_by_country")
+        or (web_crawl or {}).get("google_trends_by_country")
+        or {}
+    )
+    top_queries_by_country = (
+        web_trends.get("top_queries_by_country")
+        or (web_crawl or {}).get("top_queries_by_country")
+        or {}
+    )
+    rising_queries_by_country = (
+        web_trends.get("rising_queries_by_country")
+        or (web_crawl or {}).get("rising_queries_by_country")
+        or {}
+    )
     trending_reels = [
         post
         for post in viral_posts
@@ -159,7 +178,6 @@ def build_trend_response(
     has_web = bool(
         web_trends.get("hashtags")
         or web_trends.get("reel_formats")
-        or web_trends.get("songs")
         or web_trends.get("google_trends")
     )
     is_global = config.get("agent_mode") == "global_trend"
@@ -176,21 +194,36 @@ def build_trend_response(
             "region": config.get("region") or (config.get("filters") or {}).get("region"),
             "services": company.get("services") or [],
             "flagship_services": company.get("flagship_services") or [],
+            "instagram_username": company.get("instagram_username"),
+            "instagram_url": company.get("instagram_url"),
+            "linkedin_url": company.get("linkedin_url"),
+            "linkedin_username": company.get("linkedin_username"),
         }
         if company
         else None,
+        "company_analysis": company_analysis or None,
+        "company_posts": company_posts or [],
+        "linkedin_posts": linkedin_posts or [],
+        "pain_points": pain_points or company_analysis.get("pain_points") or [],
+        "instagram_insights": company_analysis.get("instagram"),
+        "audience_needs": company_analysis.get("audience_needs") or [],
+        "linkedin_content_themes": company_analysis.get("linkedin_content_themes") or [],
         "summary": trend_summary,
         "post_count": post_count,
         "competitor_count": len(discovered_influencers),
         "discovery_source": config.get("discovery_source"),
         "web_sources": (web_crawl or {}).get("sources") or config.get("web_sources") or [],
+        "source_breakdown": web_trends.get("source_breakdown") or (web_crawl or {}).get("source_breakdown") or [],
+        "platform_summary": (web_crawl or {}).get("platform_summary") or {},
         "warnings": (web_crawl or {}).get("warnings") or [],
         "tavily_skipped": (web_crawl or {}).get("tavily_skipped"),
         "trending_hashtags": trending_hashtags,
         "trending_topics": trending_topics,
         "trending_reel_formats": trending_reel_formats,
-        "trending_songs": trending_songs,
         "google_trends": google_trends,
+        "google_trends_by_country": google_trends_by_country,
+        "top_queries_by_country": top_queries_by_country,
+        "rising_queries_by_country": rising_queries_by_country,
         "trending_reels": trending_reels,
         "trend_scores": trend_scores[:20],
         "viral_posts": viral_posts[:20],

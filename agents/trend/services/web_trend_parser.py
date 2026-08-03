@@ -1,12 +1,10 @@
 import re
 from collections import Counter
 from typing import Any
-from agents.trend.Nodes.common import GENERIC_HASHTAGS
 
-SONG_LINE_RE = re.compile(
-    r"^#{1,3}\s*#?\d+\.?\s*(.+?)\s*[–—-]\s*(.+?)\s*$",
-    re.MULTILINE,
-)
+from agents.trend.Nodes.common import GENERIC_HASHTAGS
+from agents.trend.services.web_trend_sources import SOURCE_WEIGHTS
+
 TREND_HEADER_RE = re.compile(
     r"^#{2,3}\s*\*{0,2}(.+?)\*{0,2}\s*$",
     re.MULTILINE,
@@ -63,7 +61,6 @@ SKIP_HEADERS = frozenset(
         "best hashtags for engagement",
         "niche-specific hashtags",
         "why instagram hashtags matter",
-        "how to find trending songs",
         "references",
         "see also",
         "origin and spread",
@@ -83,27 +80,6 @@ def _clean_header(text: str) -> str:
 
 def _normalize_tag(tag: str) -> str:
     return tag.strip().lstrip("#").lower()
-
-
-def parse_songs(text: str, *, source: str) -> list[dict[str, Any]]:
-    songs: list[dict[str, Any]] = []
-    for match in SONG_LINE_RE.finditer(text):
-        title = re.sub(r"\s*\[\.\.\.\].*$", "", match.group(1).strip().strip("*"))
-        artist = re.sub(r"\s*\[\.\.\.\].*$", "", match.group(2).strip().strip("*"))
-        title = re.split(r"\s*#+\s*", title)[0].strip()
-        artist = re.split(r"\s*#+\s*", artist)[0].strip()
-        if len(title) < 2 or len(title) > 80:
-            continue
-        songs.append(
-            {
-                "title": title,
-                "artist": artist,
-                "label": f"{title} – {artist}",
-                "source": source,
-                "type": "song",
-            }
-        )
-    return songs
 
 
 def parse_reel_formats(text: str, *, source: str) -> list[dict[str, Any]]:
@@ -206,7 +182,6 @@ def parse_google_trends_page(trends: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "source": "Google Trends",
         "url": "https://trends.google.com/trending",
-        "songs": [],
         "reel_formats": [],
         "hashtags": [],
         "topics": topics,
@@ -214,11 +189,136 @@ def parse_google_trends_page(trends: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def parse_reddit_posts(
+    posts: list[dict[str, Any]],
+    *,
+    source: str,
+    focus: str,
+) -> dict[str, Any]:
+    topics: list[dict[str, Any]] = []
+    reel_formats: list[dict[str, Any]] = []
+    seen_topics: set[str] = set()
+    text_chunks: list[str] = []
+
+    for entry in posts:
+        data = entry.get("data") or {}
+        title = (data.get("title") or "").strip()
+        selftext = (data.get("selftext") or "").strip()
+        flair = (data.get("link_flair_text") or "").strip()
+        ups = int(data.get("ups") or 0)
+        if not title:
+            continue
+
+        text_chunks.extend([title, selftext, flair])
+        topic_key = title.lower()
+        if topic_key not in seen_topics and len(title) >= 8:
+            seen_topics.add(topic_key)
+            topics.append(
+                {
+                    "topic": title,
+                    "key": title,
+                    "source": source,
+                    "type": "reddit_post",
+                    "upvotes": ups,
+                    "flair": flair or None,
+                }
+            )
+        if flair and flair.lower() not in seen_topics:
+            seen_topics.add(flair.lower())
+            reel_formats.append(
+                {
+                    "name": flair,
+                    "category": flair,
+                    "source": source,
+                    "type": "reddit_flair",
+                }
+            )
+
+    combined = "\n".join(text_chunks)
+    hashtags = parse_hashtags(combined, source=source)
+    focus_set = {item.strip() for item in focus.split(",")}
+    if "culture" in focus_set or "topics" in focus_set:
+        topics.extend(parse_culture_topics(combined, source=source))
+
+    return {
+        "source": source,
+        "reel_formats": reel_formats[:15],
+        "hashtags": hashtags[:20],
+        "topics": topics[:20],
+    }
+
+
+def build_source_breakdown(parsed_pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    breakdown: list[dict[str, Any]] = []
+    for page in parsed_pages:
+        source = page.get("source") or "unknown"
+        reel_formats = page.get("reel_formats") or []
+        hashtags = page.get("hashtags") or []
+        topics = page.get("topics") or []
+        google_trends = page.get("google_trends") or []
+        item_count = len(reel_formats) + len(hashtags) + len(topics) + len(google_trends)
+        if item_count == 0:
+            continue
+
+        base_name = source.split(" (")[0] if " (" in source else source
+        breakdown.append(
+            {
+                "source": source,
+                "platform": page.get("platform") or _platform_from_source(source),
+                "url": page.get("url"),
+                "weight": SOURCE_WEIGHTS.get(base_name, SOURCE_WEIGHTS.get(source, 0.5)),
+                "counts": {
+                    "reel_formats": len(reel_formats),
+                    "hashtags": len(hashtags),
+                    "topics": len(topics),
+                    "google_trends": len(google_trends),
+                    "total": item_count,
+                },
+                "reel_formats": [{"name": f.get("name")} for f in reel_formats[:5]],
+                "hashtags": [
+                    {"tag": h.get("hashtag") or h.get("tag"), "post_count": h.get("post_count")}
+                    for h in hashtags[:8]
+                ],
+                "topics": [
+                    {"topic": t.get("topic") or t.get("key"), "upvotes": t.get("upvotes")}
+                    for t in topics[:8]
+                ],
+                "google_trends": [
+                    {"topic": g.get("topic") or g.get("key"), "geo": g.get("geo")}
+                    for g in google_trends[:5]
+                ],
+            }
+        )
+
+    breakdown.sort(
+        key=lambda item: (
+            float(item.get("weight") or 0),
+            int((item.get("counts") or {}).get("total") or 0),
+        ),
+        reverse=True,
+    )
+    return breakdown
+
+
+def _platform_from_source(source: str) -> str:
+    lowered = (source or "").lower()
+    if "reddit" in lowered:
+        return "reddit"
+    if lowered.startswith("x ") or lowered.startswith("x(") or " x " in lowered or lowered == "x":
+        return "x"
+    if "facebook" in lowered:
+        return "facebook"
+    if "linkedin" in lowered:
+        return "linkedin"
+    if "google trends" in lowered:
+        return "google"
+    return "web"
+
+
 def parse_source_content(text: str, *, source: str, focus: str) -> dict[str, Any]:
     focus_set = {item.strip() for item in focus.split(",")}
     return {
         "source": source,
-        "songs": parse_songs(text, source=source) if "songs" in focus_set or "audio" in focus_set else [],
         "reel_formats": parse_reel_formats(text, source=source),
         "hashtags": parse_hashtags(text, source=source) if "hashtags" in focus_set or "niche" in focus_set else parse_hashtags(text, source=source)[:15],
         "topics": parse_culture_topics(text, source=source) if "culture" in focus_set or "topics" in focus_set else [],
@@ -226,24 +326,17 @@ def parse_source_content(text: str, *, source: str, focus: str) -> dict[str, Any
 
 
 def merge_parsed_results(parsed_pages: list[dict[str, Any]]) -> dict[str, Any]:
-    song_seen: set[str] = set()
     format_seen: set[str] = set()
     tag_counter: Counter[str] = Counter()
     tag_sources: dict[str, set[str]] = {}
     topic_seen: set[str] = set()
     google_trends: list[dict[str, Any]] = []
 
-    songs: list[dict[str, Any]] = []
     reel_formats: list[dict[str, Any]] = []
     topics: list[dict[str, Any]] = []
 
     for page in parsed_pages:
         source = page.get("source") or "web"
-        for song in page.get("songs") or []:
-            key = (song.get("label") or "").lower()
-            if key and key not in song_seen:
-                song_seen.add(key)
-                songs.append(song)
         for fmt in page.get("reel_formats") or []:
             key = (fmt.get("name") or "").lower()
             if key and key not in format_seen:
@@ -307,30 +400,51 @@ def merge_parsed_results(parsed_pages: list[dict[str, Any]]) -> dict[str, Any]:
             }
         )
     for idx, item in enumerate(google_trends[:20]):
-        traffic = int(item.get("traffic_score") or 0)
+        traffic = int(item.get("traffic_score") or item.get("value_score") or 0)
+        query_type = item.get("query_type") or "top"
+        type_bonus = 3 if query_type == "rising" else 0
         trend_scores.append(
             {
                 "group_type": "google_trend",
                 "key": item.get("topic") or item.get("key"),
                 "geo": item.get("geo"),
+                "geo_label": item.get("geo_label"),
+                "query_type": query_type,
                 "approx_traffic": item.get("approx_traffic"),
                 "traffic_score": traffic,
                 "source": item.get("source") or "Google Trends",
-                "trend_score": round(95 - idx * 2 + min(traffic // 100, 10), 2),
+                "trend_score": round(95 - idx * 2 + min(traffic // 100, 10) + type_bonus, 2),
                 "news_items": item.get("news_items") or [],
+                "explore_url": item.get("explore_url"),
             }
         )
 
     trend_scores.sort(key=lambda item: float(item.get("trend_score") or 0), reverse=True)
 
+    source_breakdown = build_source_breakdown(parsed_pages)
+
     return {
-        "songs": songs[:15],
         "reel_formats": reel_formats[:20],
         "hashtags": hashtags,
         "topics": topics,
         "google_trends": google_trends[:25],
         "trend_scores": trend_scores,
         "source_count": len(parsed_pages),
+        "source_breakdown": source_breakdown,
+    }
+
+
+def attach_google_trends_by_country(merged: dict[str, Any], by_country: dict[str, Any]) -> dict[str, Any]:
+    if not by_country:
+        return merged
+    from agents.trend.services.google_trend_fetcher import build_queries_by_country
+
+    top_by_country, rising_by_country = build_queries_by_country(by_country)
+    return {
+        **merged,
+        "google_trends_by_country": by_country,
+        "top_queries_by_country": top_by_country,
+        "rising_queries_by_country": rising_by_country,
     }
 
 
@@ -365,7 +479,6 @@ def filter_for_niche(merged: dict[str, Any], keywords: list[str]) -> dict[str, A
             for item in merged.get("google_trends") or []
             if matches(item.get("topic") or item.get("key") or "")
         ],
-        "songs": merged.get("songs") or [],
     }
     if not filtered["hashtags"]:
         filtered["hashtags"] = (merged.get("hashtags") or [])[:10]
@@ -378,7 +491,7 @@ def filter_for_niche(merged: dict[str, Any], keywords: list[str]) -> dict[str, A
     filtered["trend_scores"] = merge_parsed_results(
         [{
             "source": "filtered",
-            **{k: filtered.get(k) for k in ("songs", "reel_formats", "hashtags", "topics", "google_trends")},
+            **{k: filtered.get(k) for k in ("reel_formats", "hashtags", "topics", "google_trends")},
         }]
     ).get("trend_scores", [])
     return filtered

@@ -55,7 +55,6 @@ async def resolve_manual_competitors(
     *,
     region: str | None = None,
 ) -> tuple[list[dict], list[str]]:
-    """Resolve company names or @handles into Instagram competitor candidates."""
     inputs = normalize_competitor_inputs(competitors)
     if not inputs:
         return [], []

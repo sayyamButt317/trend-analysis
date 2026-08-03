@@ -58,6 +58,10 @@ async def trendInvoke(
         "content_mix": [],
         "web_crawl": {},
         "web_trends": {},
+        "company_analysis": {},
+        "company_posts": [],
+        "linkedin_posts": [],
+        "pain_points": [],
         "trend_summary": "",
     }
 
@@ -68,7 +72,7 @@ async def trendInvoke(
         has_web = bool(
             web_trends.get("hashtags")
             or web_trends.get("reel_formats")
-            or web_trends.get("songs")
+            or web_trends.get("google_trends")
         )
         has_error = bool(final_state.get("error")) and not has_web and post_count == 0
         final_config = final_state.get("config") or agent_config
@@ -104,6 +108,10 @@ async def trendInvoke(
             meta=meta,
             web_trends=web_trends,
             web_crawl=final_state.get("web_crawl") or {},
+            company_analysis=final_state.get("company_analysis") or {},
+            company_posts=final_state.get("company_posts") or [],
+            linkedin_posts=final_state.get("linkedin_posts") or [],
+            pain_points=final_state.get("pain_points") or [],
             error=final_state.get("error") if has_error else None,
         )
 
