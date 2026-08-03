@@ -11,12 +11,19 @@ import httpx
 from agents.trend.services.google_trend_fetcher import fetch_google_trends
 from agents.trend.services.social_trend_fetcher import (
     classify_source,
+    fetch_linkedin_source,
     fetch_reddit_subreddit,
+    fetch_social_platform_boost,
     fetch_social_via_tavily_extract,
+    fetch_x_source,
     linkedin_source_label,
     search_social_trends_via_tavily,
 )
-from agents.trend.services.web_trend_parser import build_source_breakdown, parse_source_content
+from agents.trend.services.web_trend_parser import (
+    build_source_breakdown,
+    extract_platform_trends,
+    parse_source_content,
+)
 from agents.trend.services.web_trend_sources import TAVILY_TREND_QUERIES, TREND_SOURCES
 from config.credential_config import config
 from scrapper.tavily_retry import is_tavily_unreachable_error
@@ -148,15 +155,15 @@ async def _fetch_source(source: dict[str, str], session: _TavilySession) -> dict
             parsed["source"] = linkedin_source_label(source["url"])
             parsed["platform"] = "linkedin"
         return parsed
-    if source_type in {"x", "facebook", "linkedin"}:
+    if source_type in {"x", "facebook"}:
+        if source_type == "x":
+            return await fetch_x_source(source, session)
         parsed = await fetch_social_via_tavily_extract(source, session)
         if parsed:
-            if source_type == "linkedin":
-                parsed["source"] = linkedin_source_label(source["url"], source.get("name") or "LinkedIn")
-                parsed["platform"] = "linkedin"
             return parsed
-        if source_type in {"x", "linkedin"}:
-            return None
+        return None
+    if source_type == "linkedin":
+        return await fetch_linkedin_source(source, session)
 
     url = source["url"]
     name = source["name"]
@@ -186,11 +193,13 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
     source_tasks = [_fetch_source(source, tavily_session) for source in TREND_SOURCES]
     google_task = fetch_google_trends(region=region)
 
-    html_pages, google_result = await asyncio.gather(
+    html_pages, google_result, boost_pages = await asyncio.gather(
         asyncio.gather(*source_tasks),
         google_task,
+        fetch_social_platform_boost(tavily_session),
     )
     parsed_pages = [page for page in html_pages if page]
+    parsed_pages.extend(boost_pages)
 
     if google_result.get("parsed_page"):
         parsed_pages.append(google_result["parsed_page"])
@@ -232,6 +241,9 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
 
     source_breakdown = build_source_breakdown(parsed_pages)
     platform_summary = _summarize_by_platform(source_breakdown)
+    reddit_trends = extract_platform_trends(parsed_pages, "reddit")
+    linkedin_trends = extract_platform_trends(parsed_pages, "linkedin")
+    x_trends = extract_platform_trends(parsed_pages, "x")
 
     warnings: list[str] = []
     if tavily_session.disabled:
@@ -246,6 +258,9 @@ async def crawl_instagram_web_trends(*, region: str | None = None) -> dict[str, 
         "parsed_pages": parsed_pages,
         "source_breakdown": source_breakdown,
         "platform_summary": platform_summary,
+        "reddit_trends": reddit_trends,
+        "linkedin_trends": linkedin_trends,
+        "x_trends": x_trends,
         "google_trends": google_result.get("trends") or [],
         "google_trends_by_country": google_result.get("google_trends_by_country") or {},
         "top_queries_by_country": google_result.get("top_queries_by_country") or {},

@@ -11,6 +11,26 @@ TREND_HEADER_RE = re.compile(
 )
 HASHTAG_RE = re.compile(r"#([A-Za-z][A-Za-z0-9_]{2,49})")
 QUOTED_TREND_RE = re.compile(r"[\"“]([^\"”]{3,80})[\"”]\s+trend", re.IGNORECASE)
+TIMESTAMP_RE = re.compile(
+    r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\s+\w{3}\s+\d{1,2}\s+\d{4}|GMT|Coordinated Universal Time",
+    re.IGNORECASE,
+)
+
+TOPIC_FOCUS_ALIASES = frozenset(
+    {
+        "breaking_topics",
+        "creator_updates",
+        "cross_platform_trends",
+        "social_media_trends",
+        "creator_trends",
+        "creator_discussions",
+        "content_strategy",
+        "engagement",
+        "analytics",
+        "benchmarks",
+        "marketing",
+    }
+)
 
 JUNK_HASHTAGS = GENERIC_HASHTAGS | frozenset(
     {
@@ -68,6 +88,10 @@ SKIP_HEADERS = frozenset(
         "product",
         "pricing",
         "resources",
+        "log in or sign up for x",
+        "relevant people",
+        "trending now",
+        "post",
     }
 )
 
@@ -164,6 +188,65 @@ def parse_culture_topics(text: str, *, source: str) -> list[dict[str, Any]]:
     return topics
 
 
+def parse_general_topics(text: str, *, source: str, limit: int = 20) -> list[dict[str, Any]]:
+    topics: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for fmt in parse_reel_formats(text, source=source):
+        name = fmt.get("name") or ""
+        key = name.lower()
+        if name and key not in seen and len(name) >= 4:
+            seen.add(key)
+            topics.append(
+                {
+                    "topic": name,
+                    "key": name,
+                    "source": source,
+                    "type": "topic",
+                }
+            )
+
+    for match in QUOTED_TREND_RE.finditer(text):
+        name = match.group(1).strip()
+        key = name.lower()
+        if key not in seen:
+            seen.add(key)
+            topics.append(
+                {
+                    "topic": name,
+                    "key": name,
+                    "source": source,
+                    "type": "topic",
+                }
+            )
+
+    for line in re.split(r"[\n.!?]+", text or ""):
+        cleaned = _clean_header(line.strip())
+        if not cleaned or len(cleaned) < 12 or len(cleaned) > 140:
+            continue
+        if TIMESTAMP_RE.search(cleaned):
+            continue
+        lowered = cleaned.lower()
+        if lowered in seen or lowered in SKIP_HEADERS:
+            continue
+        if any(token in lowered for token in ("cookie", "privacy", "sign in", "javascript")):
+            continue
+        if re.search(r"\b(trend|viral|marketing|instagram|creator|algorithm|reels?)\b", lowered, re.I):
+            seen.add(lowered)
+            topics.append(
+                {
+                    "topic": cleaned,
+                    "key": cleaned,
+                    "source": source,
+                    "type": "topic",
+                }
+            )
+        if len(topics) >= limit:
+            break
+
+    return topics[:limit]
+
+
 def parse_google_trends_page(trends: list[dict[str, Any]]) -> dict[str, Any]:
     """Convert Google Trends RSS items into parser page format."""
     topics = [
@@ -201,11 +284,13 @@ def parse_reddit_posts(
     text_chunks: list[str] = []
 
     for entry in posts:
-        data = entry.get("data") or {}
+        data = entry.get("data") if isinstance(entry.get("data"), dict) else entry
+        if not isinstance(data, dict):
+            continue
         title = (data.get("title") or "").strip()
-        selftext = (data.get("selftext") or "").strip()
-        flair = (data.get("link_flair_text") or "").strip()
-        ups = int(data.get("ups") or 0)
+        selftext = (data.get("selftext") or data.get("body") or "").strip()
+        flair = (data.get("link_flair_text") or data.get("flair") or "").strip()
+        ups = int(data.get("ups") or data.get("score") or 0)
         if not title:
             continue
 
@@ -236,15 +321,120 @@ def parse_reddit_posts(
 
     combined = "\n".join(text_chunks)
     hashtags = parse_hashtags(combined, source=source)
-    focus_set = {item.strip() for item in focus.split(",")}
-    if "culture" in focus_set or "topics" in focus_set:
+    focus_set = {item.strip() for item in focus.split(",") if item.strip()}
+    if focus_set & TOPIC_FOCUS_ALIASES:
+        focus_set.add("topics")
+    if "culture" in focus_set:
         topics.extend(parse_culture_topics(combined, source=source))
+    if "topics" in focus_set:
+        topics.extend(parse_general_topics(combined, source=source))
 
     return {
         "source": source,
         "reel_formats": reel_formats[:15],
         "hashtags": hashtags[:20],
-        "topics": topics[:20],
+        "topics": topics[:25],
+    }
+
+
+def parse_reddit_comments(
+    comments: list[dict[str, Any]],
+    *,
+    source: str,
+    focus: str,
+) -> dict[str, Any]:
+    topics: list[dict[str, Any]] = []
+    seen_topics: set[str] = set()
+    text_chunks: list[str] = []
+
+    for entry in comments:
+        data = entry.get("data") if isinstance(entry.get("data"), dict) else entry
+        if not isinstance(data, dict):
+            continue
+        body = (data.get("body") or data.get("selftext") or "").strip()
+        if not body or body in {"[deleted]", "[removed]"}:
+            continue
+        ups = int(data.get("ups") or data.get("score") or 0)
+        subreddit = (data.get("subreddit") or "").strip()
+        text_chunks.append(body)
+
+        snippet = body.replace("\n", " ").strip()
+        if len(snippet) > 120:
+            snippet = snippet[:117] + "..."
+        topic_key = snippet.lower()
+        if topic_key not in seen_topics and len(snippet) >= 15:
+            seen_topics.add(topic_key)
+            topics.append(
+                {
+                    "topic": snippet,
+                    "key": snippet,
+                    "source": source,
+                    "type": "reddit_comment",
+                    "upvotes": ups,
+                    "subreddit": subreddit or None,
+                }
+            )
+
+    combined = "\n".join(text_chunks)
+    hashtags = parse_hashtags(combined, source=source)
+    focus_set = {item.strip() for item in focus.split(",") if item.strip()}
+    if focus_set & TOPIC_FOCUS_ALIASES:
+        focus_set.add("topics")
+    if "culture" in focus_set:
+        topics.extend(parse_culture_topics(combined, source=source))
+    if "topics" in focus_set:
+        topics.extend(parse_general_topics(combined, source=source))
+
+    return {
+        "source": source,
+        "reel_formats": [],
+        "hashtags": hashtags[:20],
+        "topics": topics[:25],
+    }
+
+
+def extract_platform_trends(parsed_pages: list[dict[str, Any]], platform: str) -> dict[str, Any]:
+    platform_key = platform.lower()
+    pages = [page for page in parsed_pages if (page.get("platform") or "").lower() == platform_key]
+    topics: list[dict[str, Any]] = []
+    hashtags: list[dict[str, Any]] = []
+    reel_formats: list[dict[str, Any]] = []
+    sources: list[str] = []
+    post_count = 0
+    seen_topics: set[str] = set()
+    seen_tags: set[str] = set()
+    seen_formats: set[str] = set()
+
+    for page in pages:
+        source = page.get("source")
+        if source and source not in sources:
+            sources.append(source)
+        post_count += int(page.get("post_count") or 0)
+        for topic in page.get("topics") or []:
+            key = (topic.get("topic") or topic.get("key") or "").lower()
+            if key and key not in seen_topics:
+                seen_topics.add(key)
+                topics.append(topic)
+        for tag in page.get("hashtags") or []:
+            label = tag.get("hashtag") or tag.get("tag")
+            if label and label not in seen_tags:
+                seen_tags.add(label)
+                hashtags.append(tag)
+        for fmt in page.get("reel_formats") or []:
+            key = (fmt.get("name") or "").lower()
+            if key and key not in seen_formats:
+                seen_formats.add(key)
+                reel_formats.append(fmt)
+
+    return {
+        "platform": platform_key,
+        "source_count": len(sources),
+        "post_count": post_count,
+        "sources": sources,
+        "topics": topics[:30],
+        "hashtags": hashtags[:30],
+        "reel_formats": reel_formats[:20],
+        "total_items": len(topics) + len(hashtags) + len(reel_formats),
     }
 
 
@@ -316,12 +506,31 @@ def _platform_from_source(source: str) -> str:
 
 
 def parse_source_content(text: str, *, source: str, focus: str) -> dict[str, Any]:
-    focus_set = {item.strip() for item in focus.split(",")}
+    focus_set = {item.strip() for item in focus.split(",") if item.strip()}
+    if focus_set & TOPIC_FOCUS_ALIASES:
+        focus_set.add("topics")
+    if "breaking_topics" in focus_set or "hashtags" in focus_set:
+        focus_set.add("hashtags")
+
+    topics: list[dict[str, Any]] = []
+    if "culture" in focus_set:
+        topics.extend(parse_culture_topics(text, source=source))
+    if "topics" in focus_set:
+        topics.extend(parse_general_topics(text, source=source))
+
+    seen: set[str] = set()
+    unique_topics: list[dict[str, Any]] = []
+    for topic in topics:
+        key = (topic.get("topic") or topic.get("key") or "").lower()
+        if key and key not in seen:
+            seen.add(key)
+            unique_topics.append(topic)
+
     return {
         "source": source,
         "reel_formats": parse_reel_formats(text, source=source),
         "hashtags": parse_hashtags(text, source=source) if "hashtags" in focus_set or "niche" in focus_set else parse_hashtags(text, source=source)[:15],
-        "topics": parse_culture_topics(text, source=source) if "culture" in focus_set or "topics" in focus_set else [],
+        "topics": unique_topics[:25],
     }
 
 

@@ -189,6 +189,12 @@ TREND_SOURCES: list[dict[str, str]] = [
         "focus": "breaking_topics,hashtags,culture",
         "priority": "high",
     },
+    {
+        "url": "https://help.x.com/en/using-x/x-trending-faqs",
+        "name": "X",
+        "focus": "breaking_topics,hashtags,topics",
+        "priority": "medium",
+    },
     # Facebook
     {
         "url": "https://www.facebook.com/business/news",
@@ -203,6 +209,12 @@ TREND_SOURCES: list[dict[str, str]] = [
         "priority": "medium",
     },
     # LinkedIn
+    {
+        "url": "https://www.linkedin.com/business/marketing/blog",
+        "name": "LinkedIn",
+        "focus": "topics,hashtags,culture,reel_formats",
+        "priority": "high",
+    },
     {
         "url": "https://www.linkedin.com/pulse/topic/marketing/",
         "name": "LinkedIn",
