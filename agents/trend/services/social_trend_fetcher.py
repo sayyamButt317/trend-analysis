@@ -17,7 +17,7 @@ _PULLPUSH_LOCK = asyncio.Lock()
 REDDIT_SUBREDDIT_RE = re.compile(r"reddit\.com/r/([^/?#]+)", re.IGNORECASE)
 PULLPUSH_SUBMISSION_URL = "https://api.pullpush.io/reddit/search/submission/"
 PULLPUSH_COMMENT_URL = "https://api.pullpush.io/reddit/search/comment/"
-PULLPUSH_REQUEST_DELAY = 1.0
+PULLPUSH_REQUEST_DELAY = 0.6
 
 REDDIT_PULLPUSH_KEYWORDS = [
     "instagram",
@@ -33,8 +33,6 @@ REDDIT_PULLPUSH_KEYWORDS = [
 REDDIT_PULLPUSH_EXTRA_SUBREDDITS = [
     "ContentCreation",
     "digital_marketing",
-    "socialmediamarketing",
-    "smallbusiness",
 ]
 
 REDDIT_SITE_QUERIES = [
@@ -42,6 +40,10 @@ REDDIT_SITE_QUERIES = [
     "site:reddit.com/r/socialmedia trending social media",
     "site:reddit.com/r/marketing viral marketing trends",
     "site:reddit.com/r/InstagramMarketing growth strategy",
+    "site:reddit.com/r/InfluencerMarketing creator trends",
+    "site:reddit.com/r/ContentCreation instagram strategy",
+    "site:reddit.com instagram algorithm 2026",
+    "site:reddit.com viral reels marketing",
 ]
 
 X_SITE_QUERIES = [
@@ -148,7 +150,7 @@ async def fetch_reddit_subreddit(
     return parsed
 
 
-async def _pullpush_get(url: str, params: dict[str, Any], *, retries: int = 4) -> list[dict[str, Any]]:
+async def _pullpush_get(url: str, params: dict[str, Any], *, retries: int = 2) -> list[dict[str, Any]]:
     headers = {"User-Agent": "TrendBot/1.0 (web trend aggregator)"}
     async with _PULLPUSH_LOCK:
         for attempt in range(retries):
@@ -218,67 +220,60 @@ def _reddit_page_from_items(
 
 async def fetch_reddit_pullpush_boost() -> list[dict[str, Any]]:
     pages: list[dict[str, Any]] = []
+    consecutive_failures = 0
 
-    for subreddit in REDDIT_PULLPUSH_EXTRA_SUBREDDITS:
-        items = await _pullpush_get(
-            PULLPUSH_SUBMISSION_URL,
-            {
-                "subreddit": subreddit,
-                "size": 30,
-                "sort": "desc",
-                "sort_type": "score",
-            },
-        )
-        await asyncio.sleep(PULLPUSH_REQUEST_DELAY)
-        label = f"Reddit (r/{subreddit})"
-        page = _reddit_page_from_items(
-            items,
-            source=label,
-            url=f"https://www.reddit.com/r/{subreddit}/",
-        )
+    async def _try_page(items: list[dict[str, Any]], **kwargs: Any) -> None:
+        nonlocal consecutive_failures
+        if not items:
+            consecutive_failures += 1
+            return
+        consecutive_failures = 0
+        page = _reddit_page_from_items(items, **kwargs)
         if page:
             pages.append(page)
 
-    for keyword in REDDIT_PULLPUSH_KEYWORDS:
+    for subreddit in REDDIT_PULLPUSH_EXTRA_SUBREDDITS:
+        if consecutive_failures >= 3:
+            logger.warning("PullPush rate limited — skipping remaining Reddit boost fetches")
+            break
         items = await _pullpush_get(
             PULLPUSH_SUBMISSION_URL,
-            {
-                "q": keyword,
-                "size": 25,
-                "sort": "desc",
-                "sort_type": "score",
-            },
+            {"subreddit": subreddit, "size": 20, "sort": "desc", "sort_type": "score"},
         )
-        await asyncio.sleep(PULLPUSH_REQUEST_DELAY)
-        page = _reddit_page_from_items(
+        await _try_page(
+            items,
+            source=f"Reddit (r/{subreddit})",
+            url=f"https://www.reddit.com/r/{subreddit}/",
+        )
+
+    for keyword in REDDIT_PULLPUSH_KEYWORDS:
+        if consecutive_failures >= 3:
+            break
+        items = await _pullpush_get(
+            PULLPUSH_SUBMISSION_URL,
+            {"q": keyword, "size": 15, "sort": "desc", "sort_type": "score"},
+        )
+        await _try_page(
             items,
             source=f"Reddit (search: {keyword})",
             url=f"{PULLPUSH_SUBMISSION_URL}?q={keyword}",
         )
-        if page:
-            pages.append(page)
 
-    for keyword in REDDIT_PULLPUSH_KEYWORDS[:6]:
+    for keyword in REDDIT_PULLPUSH_KEYWORDS[:4]:
+        if consecutive_failures >= 3:
+            break
         items = await _pullpush_get(
             PULLPUSH_COMMENT_URL,
-            {
-                "q": keyword,
-                "size": 20,
-                "sort": "desc",
-                "sort_type": "score",
-            },
+            {"q": keyword, "size": 12, "sort": "desc", "sort_type": "score"},
         )
-        await asyncio.sleep(PULLPUSH_REQUEST_DELAY)
-        page = _reddit_page_from_items(
+        await _try_page(
             items,
             source=f"Reddit (comments: {keyword})",
             url=f"{PULLPUSH_COMMENT_URL}?q={keyword}",
             kind="comment",
         )
-        if page:
-            pages.append(page)
 
-    logger.info("PullPush Reddit boost: %s pages", len(pages))
+    logger.info("PullPush Reddit boost: %s pages (failures=%s)", len(pages), consecutive_failures)
     return pages
 
 
@@ -667,25 +662,33 @@ def fetch_platform_tavily_pages(
 
 
 async def fetch_social_platform_boost(session: Any) -> list[dict[str, Any]]:
-    reddit_task = fetch_reddit_pullpush_boost()
-    linkedin_task = asyncio.to_thread(
-        fetch_platform_tavily_pages,
-        "LinkedIn",
-        LINKEDIN_SITE_QUERIES,
-        session,
-        max_results=8,
-    )
-    x_task = asyncio.to_thread(
-        fetch_platform_tavily_pages,
-        "X",
-        X_SITE_QUERIES,
-        session,
-        max_results=8,
-    )
-    reddit_pages, linkedin_pages, x_pages = await asyncio.gather(
-        reddit_task,
-        linkedin_task,
-        x_task,
+    reddit_pages = await fetch_reddit_pullpush_boost()
+    if len(reddit_pages) < 2:
+        reddit_pages.extend(
+            await asyncio.to_thread(
+                fetch_platform_tavily_pages,
+                "Reddit",
+                REDDIT_SITE_QUERIES,
+                session,
+                max_results=10,
+            )
+        )
+
+    linkedin_pages, x_pages = await asyncio.gather(
+        asyncio.to_thread(
+            fetch_platform_tavily_pages,
+            "LinkedIn",
+            LINKEDIN_SITE_QUERIES,
+            session,
+            max_results=10,
+        ),
+        asyncio.to_thread(
+            fetch_platform_tavily_pages,
+            "X",
+            X_SITE_QUERIES,
+            session,
+            max_results=10,
+        ),
     )
     boost_pages = reddit_pages + linkedin_pages + x_pages
     logger.info(

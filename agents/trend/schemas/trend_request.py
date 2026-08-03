@@ -12,6 +12,30 @@ class TrendDiscoveryRequest(BaseModel):
         default=None,
         description="Optional company profile. When provided with region, finds niche-specific trends.",
     )
+    instausername: Optional[str] = Field(
+        default=None,
+        description="Optional Instagram username. When provided with region, finds niche-specific trends.",
+    )
+    linkedinusername: Optional[str] = Field(
+        default=None,
+        description="Optional LinkedIn username. When provided with region, finds niche-specific trends.",
+    )
+    xusername: Optional[str] = Field(
+        default=None,
+        description="Optional X username. When provided with region, finds niche-specific trends.",
+    )
+    facebookusername: Optional[str] = Field(
+        default=None,
+        description="Optional Facebook username. When provided with region, finds niche-specific trends.",
+    )
+    redditusername: Optional[str] = Field(
+        default=None,
+        description="Optional Reddit username. When provided with region, finds niche-specific trends.",
+    )
+    xusername: Optional[str] = Field(
+        default=None,
+        description="Optional X username. When provided with region, finds niche-specific trends.",
+    )
     region: Optional[str] = Field(
         default=None,
         description="Target region (required when company_data is provided).",
