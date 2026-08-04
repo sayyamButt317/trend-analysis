@@ -56,8 +56,12 @@ class CompanyUnderstandingService:
             )
             profile.confidence = self._calculate_confidence(profile, company)
             return profile
-        except Exception:
-            logger.exception("Company understanding failed for %s", company.name)
+        except Exception as exc:
+            logger.warning(
+                "Company understanding LLM unavailable for %s (%s); using heuristic profile",
+                company.name,
+                exc,
+            )
             return self._fallback_profile(company, website_intel=website_intel)
 
     def _fallback_profile(

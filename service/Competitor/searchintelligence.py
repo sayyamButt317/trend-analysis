@@ -48,8 +48,12 @@ audience_terms, alternative_names, competitor_patterns, excluded_terms, confiden
                 excluded_terms=[str(x) for x in data.get("excluded_terms") or []][:10],
                 confidence=float(data.get("confidence") or 0.7),
             )
-        except Exception:
-            logger.exception("Search intelligence generation failed")
+        except Exception as exc:
+            logger.warning(
+                "Search intelligence LLM unavailable for %s (%s); using heuristic queries",
+                company.name,
+                exc,
+            )
             return self._heuristic(company, region=region_label)
 
     def _heuristic(self, company: CompanyProfile, *, region: str) -> SearchIntelligence:
