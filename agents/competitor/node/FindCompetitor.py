@@ -59,7 +59,12 @@ async def find_competitors(
             )
         return candidates[:competitor_limit], filters_applied, None
 
-    pool_size = max(competitor_limit * DISCOVERY_POOL_MULTIPLIER, 120)
+    pool_multiplier = int(
+        (config.get("runtime_profile") or {}).get("discovery_candidate_multiplier") or DISCOVERY_POOL_MULTIPLIER
+    )
+    pool_size = competitor_limit * pool_multiplier
+    if not (config.get("runtime_profile") or {}).get("serverless"):
+        pool_size = max(pool_size, 120)
     try:
         candidates, filters_applied = await discover_competitors(
             company_name=company_name,

@@ -34,13 +34,15 @@ class CompanyIntelligenceBuilder:
         search_intel: SearchIntelligence,
         region: str | None = None,
         limit: int = 50,
+        max_tavily_queries: int = 20,
+        max_firecrawl_queries: int = 8,
     ) -> list[dict[str, Any]]:
-        queries = list(dict.fromkeys(search_intel.search_queries))[:20]
+        queries = list(dict.fromkeys(search_intel.search_queries))[:max_tavily_queries]
         tavily_candidates = await self.tavily.discover(queries)
 
         firecrawl_candidates: list[DiscoveryCandidate] = []
         if self.firecrawl.available:
-            for query in queries[:8]:
+            for query in queries[:max_firecrawl_queries]:
                 for item in self.firecrawl.search_web(query, limit=5):
                     url = item.get("url") or item.get("link") or ""
                     if not url:

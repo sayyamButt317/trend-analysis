@@ -17,6 +17,8 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     config = state.get("config") or {}
     filters = config.get("filters") or config
     region = filters.get("region") or config.get("region")
+    runtime = config.get("runtime_profile") or {}
+    candidate_multiplier = int(runtime.get("discovery_candidate_multiplier") or 3)
     competitor_limit = int(
         filters.get("competitor_limit") or config.get("competitor_limit") or 50
     )
@@ -31,7 +33,9 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
         company=company,
         search_intel=search_intel,
         region=region,
-        limit=competitor_limit * 3,
+        limit=competitor_limit * candidate_multiplier,
+        max_tavily_queries=int(runtime.get("max_tavily_queries") or 20),
+        max_firecrawl_queries=int(runtime.get("max_firecrawl_queries") or 8),
     )
 
     verifier = CompanyVerifier()

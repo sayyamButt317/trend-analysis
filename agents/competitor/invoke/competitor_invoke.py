@@ -1,3 +1,4 @@
+import asyncio
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -6,6 +7,7 @@ from agents.competitor.graph.competitor_graph import competitor_graph_app
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
 from agents.trend.services.competitor_response import build_competitor_response
 from agents.trend.state.trend_state import TrendState
+from core.runtime import runtime_profile
 from db.competitor_storage import save_competitor_run
 
 
@@ -21,6 +23,8 @@ async def competitorAnalysisAgent(
         "platform": "instagram",
         **(config or {}),
     }
+    profile = agent_config.get("runtime_profile") or runtime_profile()
+    max_duration = profile.get("max_duration_sec")
     company_payload = agent_config.get("company") or request.normalized_company()
     filters_applied = agent_config.get("filters") or {"region": request.region}
 
@@ -47,7 +51,11 @@ async def competitorAnalysisAgent(
     }
 
     try:
-        final_state = await competitor_graph_app.ainvoke(initial_state)
+        invoke = competitor_graph_app.ainvoke(initial_state)
+        if max_duration:
+            final_state = await asyncio.wait_for(invoke, timeout=float(max_duration))
+        else:
+            final_state = await invoke
         post_count = len(final_state.get("processed_posts") or [])
         has_error = bool(final_state.get("error"))
         duration_sec = round(time.time() - start_time, 3)
@@ -62,6 +70,10 @@ async def competitorAnalysisAgent(
             "platform": "instagram",
             "agent_mode": "competitor",
             "discovery_source": final_state.get("config", {}).get("discovery_source"),
+            "serverless": bool(profile.get("serverless")),
+            "competitor_limit": agent_config.get("competitor_limit"),
+            "post_limit": agent_config.get("post_limit"),
+            "skip_linkedin": bool(agent_config.get("skip_linkedin")),
         }
 
         result = build_competitor_response(
@@ -81,6 +93,32 @@ async def competitorAnalysisAgent(
             recommendations=final_state.get("recommendations"),
             ai_report=final_state.get("ai_report"),
             similarity_scores=final_state.get("similarity_scores"),
+        )
+    except asyncio.TimeoutError:
+        duration_sec = round(time.time() - start_time, 3)
+        limit = agent_config.get("competitor_limit")
+        result = build_competitor_response(
+            company=company_payload,
+            filters=filters_applied,
+            competitors=[],
+            processed_posts=[],
+            content_mix=[],
+            topics=[],
+            hashtags=[],
+            summary="",
+            meta={
+                "status": "failed",
+                "duration_sec": duration_sec,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "platform": "instagram",
+                "agent_mode": "competitor",
+                "serverless": bool(profile.get("serverless")),
+            },
+            error=(
+                f"Analysis exceeded the {max_duration}s serverless time limit. "
+                f"Retry with fewer competitors (current limit: {limit}). "
+                "On Vercel, use competitor_limit=3 in the request body."
+            ),
         )
     except Exception as exc:
         duration_sec = round(time.time() - start_time, 3)

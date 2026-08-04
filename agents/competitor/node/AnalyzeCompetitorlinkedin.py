@@ -61,6 +61,7 @@ async def analyze_competitor_linkedin(
     *,
     region: str | None = None,
     post_limit: int = 10,
+    skip_playwright: bool = False,
 ) -> Competitor:
     """Resolve and analyze a competitor's LinkedIn company page."""
     name = (competitor.get("name") or competitor.get("username") or "").strip()
@@ -89,7 +90,12 @@ async def analyze_competitor_linkedin(
         enriched["linkedin_analysis"] = None
         return enriched
 
-    posts = await fetch_linkedin_company_posts(linkedin_url, name, limit=post_limit)
+    posts = await fetch_linkedin_company_posts(
+        linkedin_url,
+        name,
+        limit=post_limit,
+        skip_playwright=skip_playwright,
+    )
     if not posts:
         warnings.append(f"Could not fetch LinkedIn posts from {linkedin_url}.")
 
@@ -114,9 +120,14 @@ async def AnalyzeCompetitorLinkedinNode(state: CompetitorState) -> CompetitorSta
         return state
 
     config = state.get("config") or {}
+    if config.get("skip_linkedin"):
+        logger.info("Skipping LinkedIn analysis (serverless mode)")
+        return state
+
     filters = config.get("filters") or config
     region = filters.get("region") or config.get("region")
     post_limit = min(int(filters.get("post_limit") or config.get("post_limit") or 15), 10)
+    skip_playwright = bool(config.get("skip_playwright"))
 
     competitors = state.get("discovered_influencers") or state.get("competitors") or []
     enriched: list[Competitor] = []
@@ -127,6 +138,7 @@ async def AnalyzeCompetitorLinkedinNode(state: CompetitorState) -> CompetitorSta
                 competitor,
                 region=region,
                 post_limit=post_limit,
+                skip_playwright=skip_playwright,
             )
             enriched.append(item)
         except Exception:

@@ -6,6 +6,7 @@ from agents.trend.services.company_profile_parser import (
     merge_company_with_profile,
     normalize_profile_text,
 )
+from core.runtime import runtime_profile
 
 
 SUPPORTED_MEDIA_TYPES = ("Reels", "Carousel", "Image", "Video")
@@ -54,6 +55,21 @@ class CompetitorAnalysisRequest(BaseModel):
         ),
         examples=[["@competitor1", "Acme Software Lahore"]],
     )
+    competitor_limit: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=50,
+        description=(
+            "Max competitors to analyze. Defaults to 5 on Vercel/serverless and 50 locally. "
+            "Use 3–5 on serverless to stay under the 300s timeout."
+        ),
+    )
+    post_limit: Optional[int] = Field(
+        default=None,
+        ge=1,
+        le=25,
+        description="Instagram posts per competitor (default 5 on serverless, 10 locally).",
+    )
 
     @field_validator("company_data", "region")
     @classmethod
@@ -73,7 +89,15 @@ class CompetitorAnalysisRequest(BaseModel):
 
     def to_agent_config(self) -> dict[str, Any]:
         company = merge_company_with_profile({"profile": self.company_data})
-        filters = CompetitorFilters(region=self.region, competitor_limit=50).model_dump()
+        profile = runtime_profile()
+        competitor_limit = self.competitor_limit or profile["competitor_limit"]
+        post_limit = self.post_limit or profile["post_limit"]
+        filters = CompetitorFilters(
+            region=self.region,
+            competitor_limit=competitor_limit,
+            post_limit=post_limit,
+            request_delay_seconds=float(profile["request_delay_seconds"]),
+        ).model_dump()
         if self.competitors:
             filters["competitors"] = self.competitors
         filters["keywords"] = list(
@@ -93,6 +117,9 @@ class CompetitorAnalysisRequest(BaseModel):
             "company_profile": company.get("profile") or self.company_data,
             "company_website": company.get("website"),
             "company_signals": company.get("company_signals") or {},
+            "runtime_profile": profile,
+            "skip_linkedin": profile["skip_linkedin"],
+            "skip_playwright": profile["skip_playwright"],
             **filters,
             "filters": filters,
         }

@@ -535,12 +535,15 @@ async def fetch_linkedin_company_posts(
     company_name: str,
     *,
     limit: int = 10,
+    skip_playwright: bool = False,
 ) -> list[dict[str, Any]]:
     normalized = _normalize_linkedin_url(linkedin_url)
     if not normalized:
         return []
 
-    posts = await _fetch_linkedin_posts_playwright(normalized, limit=limit)
+    posts: list[dict[str, Any]] = []
+    if not skip_playwright:
+        posts = await _fetch_linkedin_posts_playwright(normalized, limit=limit)
     if not posts:
         posts = await _fetch_linkedin_posts_tavily(normalized, company_name, limit=limit)
     return posts

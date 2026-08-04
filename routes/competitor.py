@@ -20,7 +20,9 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
     summary="Analyze competitors from company details + region",
     description=(
         "Send company details + region. Optionally pass competitor names or @handles "
-        "to analyze specific accounts; otherwise uses smart matching to discover competitors."
+        "to analyze specific accounts; otherwise uses smart matching to discover competitors. "
+        "On Vercel/serverless, defaults to 5 competitors to fit the 300s timeout — "
+        "pass `competitor_limit: 3` for faster runs."
     ),
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):
