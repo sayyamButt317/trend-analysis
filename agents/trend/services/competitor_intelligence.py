@@ -4,8 +4,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
 from agents.trend.services.company_profile_parser import CompanySignals, parse_company_profile
 from config.credential_config import config
 
@@ -98,10 +96,10 @@ def _heuristic_intel(
     profile_bits.append(f"Active in {location}")
 
     return CompetitorIntel(
-        competitor_types=competitor_types[:5],
-        search_queries=list(dict.fromkeys(web_queries))[:12],
-        instagram_queries=list(dict.fromkeys(instagram_queries))[:15],
-        target_keywords=keywords[:20],
+        competitor_types=competitor_types[:8],
+        search_queries=list(dict.fromkeys(web_queries))[:25],
+        instagram_queries=list(dict.fromkeys(instagram_queries))[:35],
+        target_keywords=keywords[:30],
         ideal_competitor_profile=". ".join(bit for bit in profile_bits if bit),
         source="heuristic",
     )
@@ -114,9 +112,7 @@ async def _llm_intel(
     company_profile: str,
     signals: CompanySignals,
 ) -> CompetitorIntel | None:
-    api_key = (config.OPENAI_API_KEY or "").strip()
-    model = (config.OPENAI_MODEL_NAME or "gpt-4o-mini").strip()
-    if not api_key:
+    if not (config.OPENAI_API_KEY or "").strip():
         return None
 
     prompt = f"""You are a competitive intelligence analyst. Given a company profile and target region, identify who their real business competitors are and how to find them on Instagram.
@@ -140,31 +136,19 @@ Return ONLY valid JSON with this shape:
 """
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                "https://api.openai.com/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": model,
-                    "temperature": 0.2,
-                    "response_format": {"type": "json_object"},
-                    "messages": [
-                        {"role": "system", "content": "Return only JSON."},
-                        {"role": "user", "content": prompt},
-                    ],
-                },
-            )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        data = json.loads(content)
+        from service.Competitor.openai_client import chat_completion_json
+
+        data = await chat_completion_json(
+            messages=[
+                {"role": "system", "content": "Return only JSON."},
+                {"role": "user", "content": prompt},
+            ],
+        )
         return CompetitorIntel(
-            competitor_types=[str(x) for x in data.get("competitor_types") or []][:5],
-            search_queries=[str(x) for x in data.get("search_queries") or []][:12],
-            instagram_queries=[str(x) for x in data.get("instagram_queries") or []][:15],
-            target_keywords=[str(x) for x in data.get("target_keywords") or []][:20],
+            competitor_types=[str(x) for x in data.get("competitor_types") or []][:8],
+            search_queries=[str(x) for x in data.get("search_queries") or []][:25],
+            instagram_queries=[str(x) for x in data.get("instagram_queries") or []][:35],
+            target_keywords=[str(x) for x in data.get("target_keywords") or []][:30],
             ideal_competitor_profile=str(data.get("ideal_competitor_profile") or ""),
             source="llm",
         )
@@ -175,12 +159,12 @@ Return ONLY valid JSON with this shape:
 
 def _merge_intel(primary: CompetitorIntel, fallback: CompetitorIntel) -> CompetitorIntel:
     return CompetitorIntel(
-        competitor_types=list(dict.fromkeys([*primary.competitor_types, *fallback.competitor_types]))[:5],
-        search_queries=list(dict.fromkeys([*primary.search_queries, *fallback.search_queries]))[:15],
+        competitor_types=list(dict.fromkeys([*primary.competitor_types, *fallback.competitor_types]))[:8],
+        search_queries=list(dict.fromkeys([*primary.search_queries, *fallback.search_queries]))[:30],
         instagram_queries=list(
             dict.fromkeys([*primary.instagram_queries, *fallback.instagram_queries])
-        )[:20],
-        target_keywords=list(dict.fromkeys([*primary.target_keywords, *fallback.target_keywords]))[:25],
+        )[:40],
+        target_keywords=list(dict.fromkeys([*primary.target_keywords, *fallback.target_keywords]))[:35],
         ideal_competitor_profile=primary.ideal_competitor_profile or fallback.ideal_competitor_profile,
         source=primary.source if primary.source == "llm" else fallback.source,
     )

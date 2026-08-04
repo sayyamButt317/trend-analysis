@@ -192,7 +192,7 @@ def build_trend_response(
     return {
         "success": success,
         "error": error,
-        "mode": config.get("agent_mode") or ("global_trend" if is_global else "company_trend"),
+        "mode": config.get("agent_mode") or ("global_trend" if is_global else "niche_trend"),
         "company": {
             "name": company.get("name"),
             "detected_category": config.get("detected_category") or config.get("category"),
@@ -220,10 +220,21 @@ def build_trend_response(
         ),
         "company_posts": company_posts or [],
         "linkedin_posts": linkedin_posts or [],
-        "pain_points": pain_points or company_analysis.get("pain_points") or [],
+        "pain_points": pain_points or company_analysis.get("audience_pain_points") or company_analysis.get("pain_points") or [],
         "instagram_insights": company_analysis.get("instagram"),
         "instagram_niche_analysis": company_analysis.get("instagram"),
-        "linkedin_pain_points": pain_points or company_analysis.get("pain_points") or [],
+        "audience_pain_points": (
+            company_analysis.get("audience_pain_points")
+            or pain_points
+            or company_analysis.get("pain_points")
+            or []
+        ),
+        "linkedin_pain_points": (
+            company_analysis.get("audience_pain_points")
+            or pain_points
+            or company_analysis.get("pain_points")
+            or []
+        ),
         "audience_needs": company_analysis.get("audience_needs") or [],
         "linkedin_content_themes": company_analysis.get("linkedin_content_themes") or [],
         "analysis_warnings": company_analysis.get("warnings") or [],

@@ -1,7 +1,7 @@
-from agents.trend.state.trend_state import TrendState
+from agents.competitor.state.competitor_state import CompetitorState
 
 
-async def FilterDuplicatePostsNode(state: TrendState) -> TrendState:
+async def FilterDuplicatePostsNode(state: CompetitorState) -> CompetitorState:
     seen_ids: set[str] = set()
     seen_urls: set[str] = set()
     unique_posts: list[dict] = []

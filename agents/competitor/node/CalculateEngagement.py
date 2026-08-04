@@ -1,7 +1,7 @@
-from agents.trend.state.trend_state import TrendState
+from agents.competitor.state.competitor_state import CompetitorState
 
 
-async def CalculateEngagementNode(state: TrendState) -> TrendState:
+async def CalculateEngagementNode(state: CompetitorState) -> CompetitorState:
     metrics: list[dict] = []
     for post in state.get("processed_posts") or []:
         followers = max(int(post.get("followers") or 0), 1)

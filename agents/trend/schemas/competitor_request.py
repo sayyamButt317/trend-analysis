@@ -21,8 +21,8 @@ class CompetitorFilters(BaseModel):
     competitors: list[str] = Field(default_factory=list)
     competitor_usernames: list[str] = Field(default_factory=list)
     exclude_usernames: list[str] = Field(default_factory=list)
-    competitor_limit: int = Field(default=10, ge=1, le=30)
-    post_limit: int = Field(default=15, ge=1, le=25)
+    competitor_limit: int = Field(default=50, ge=1, le=50)
+    post_limit: int = Field(default=10, ge=1, le=25)
     media_types: list[str] = Field(default_factory=list)
     min_followers: Optional[int] = Field(default=None, ge=0)
     request_delay_seconds: float = Field(default=1.0, ge=0, le=10)
@@ -73,7 +73,7 @@ class CompetitorAnalysisRequest(BaseModel):
 
     def to_agent_config(self) -> dict[str, Any]:
         company = merge_company_with_profile({"profile": self.company_data})
-        filters = CompetitorFilters(region=self.region).model_dump()
+        filters = CompetitorFilters(region=self.region, competitor_limit=50).model_dump()
         if self.competitors:
             filters["competitors"] = self.competitors
         filters["keywords"] = list(

@@ -38,7 +38,7 @@ async def ProcessWebTrendsNode(state: TrendState) -> TrendState:
         merged,
         (crawl.get("google_trends_by_country") or {}),
     )
-    if config.get("agent_mode") == "company_trend":
+    if config.get("agent_mode") in {"company_trend", "niche_trend"}:
         merged = filter_for_niche(merged, _niche_keywords(config))
 
     state["web_crawl"] = crawl

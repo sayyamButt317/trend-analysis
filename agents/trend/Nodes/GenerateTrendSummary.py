@@ -170,7 +170,7 @@ async def GenerateTrendSummaryNode(state: TrendState) -> TrendState:
         )
     if pain_points:
         pp = ", ".join(item.get("pain_point") for item in pain_points[:3] if item.get("pain_point"))
-        lines.append(f"Detected audience pain points: {pp}.")
+        lines.append(f"Audience pain points (customer problems): {pp}.")
     lines.append(f"Analyzed {competitor_count} competitor account(s) via {discovery_label}.")
     lines.append(f"Processed {post_count} competitor posts; flagged {viral_count} viral posts.")
 

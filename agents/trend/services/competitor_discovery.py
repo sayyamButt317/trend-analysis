@@ -36,6 +36,58 @@ REGION_ALIASES: dict[str, str] = {
 
 COMPANY_SUFFIXES = (" LLC", " Inc", " Ltd", " Co", " Corporation", " Pvt", " L.L.C.")
 
+GCC_CITIES = ("Dubai", "Abu Dhabi", "Riyadh", "Jeddah", "Doha", "Kuwait City", "Muscat", "Manama")
+MENA_CITIES = ("Cairo", "Amman", "Beirut", "Casablanca")
+PK_CITIES = ("Lahore", "Karachi", "Islamabad", "Rawalpindi")
+
+
+def _expansion_cities(region: str | None, city: str | None) -> list[str]:
+    cities: list[str] = []
+    if city:
+        cities.append(city.strip())
+    if not region:
+        return cities
+    key = region.lower().strip()
+    if key in {"gcc", "gulf", "uae", "united arab emirates", "saudi arabia", "sa", "mena"}:
+        cities.extend(GCC_CITIES)
+    if key in {"mena", "middle east"}:
+        cities.extend(MENA_CITIES)
+    if key in {"pakistan", "pk"}:
+        cities.extend(PK_CITIES)
+    return list(dict.fromkeys(item for item in cities if item))
+
+
+def _build_expansion_queries(
+    *,
+    intel: CompetitorIntel,
+    location: str,
+    services: list[str],
+    region: str | None,
+    city: str | None,
+    round_index: int,
+) -> tuple[list[str], list[str]]:
+    web: list[str] = []
+    instagram: list[str] = []
+    service_terms = list(dict.fromkeys([*(services or []), *(intel.target_keywords or [])[:8]]))
+
+    for service in service_terms[:6]:
+        web.append(f"{service} companies {location}")
+        web.append(f"top {service} agency {location}")
+        instagram.append(f"{service} company {location} instagram")
+        instagram.append(f"{service} software house {location} site:instagram.com")
+
+    for expansion_city in _expansion_cities(region, city)[:6]:
+        for service in service_terms[:3]:
+            instagram.append(f"{service} {expansion_city} instagram business")
+            web.append(f"{service} company {expansion_city}")
+
+    if round_index >= 2:
+        for comp_type in intel.competitor_types[:5]:
+            web.append(f"{comp_type} {location}")
+            instagram.append(f"{comp_type} {location} instagram")
+
+    return list(dict.fromkeys(web))[:20], list(dict.fromkeys(instagram))[:25]
+
 
 def normalize_region(region: str | None) -> str | None:
     if not region:
@@ -225,57 +277,20 @@ def is_own_company_account(
     return False
 
 
-async def discover_competitors(
+async def _collect_candidates_from_searches(
     *,
-    company_name: str,
-    industry: str | None = None,
-    category: str | None = None,
-    region: str | None = None,
-    country: str | None = None,
-    city: str | None = None,
-    keywords: list[str] | None = None,
-    company_description: str | None = None,
-    company_profile: str | None = None,
-    company_signals: dict[str, Any] | None = None,
-    company_username: str | None = None,
-    company_website: str | None = None,
-    exclude_usernames: list[str] | None = None,
-    limit: int = 10,
-) -> tuple[list[dict], dict[str, Any]]:
-    normalized_region = normalize_region(region)
-    location = build_location_label(region=region, country=country, city=city)
-
-    intel = await build_competitor_intelligence(
-        company_name=company_name,
-        region=region or "Global",
-        company_profile=company_profile or company_description or "",
-        company_signals=company_signals,
-    )
-
-    filters_applied = {
-        "region": normalized_region,
-        "country": country,
-        "city": city,
-        "industry": industry,
-        "category": category,
-        "keywords": keywords or [],
-        "competitor_limit": limit,
-        "company_signals": company_signals or {},
-        "competitor_intelligence": intel.to_dict(),
-        "matching_mode": "smart",
-    }
-
-    if not config.TRAVILY_API_KEY:
-        logger.warning("TRAVILY_API_KEY is not configured; competitor discovery disabled")
-        return [], filters_applied
-
-    client = TavilyClient(api_key=config.TRAVILY_API_KEY)
-    candidate_pool: dict[str, dict] = {}
-    web_queries = intel.search_queries[:8]
-    instagram_queries = intel.instagram_queries[:12]
-
-    web_fn = lambda query: _search_web_sync(client, query)
-    web_results = await run_limited_searches(web_queries, web_fn, concurrency=3)
+    client: TavilyClient,
+    candidate_pool: dict[str, dict],
+    web_queries: list[str],
+    instagram_queries: list[str],
+    normalized_region: str | None,
+    country: str | None,
+    city: str | None,
+    industry: str | None,
+    location: str,
+) -> None:
+    web_fn = lambda query: _search_web_sync(client, query, max_results=10)
+    web_results = await run_limited_searches(web_queries, web_fn, concurrency=4)
 
     for query, results in web_results.items():
         for result in results:
@@ -297,7 +312,7 @@ async def discover_competitors(
             ig_urls = _search_instagram_profiles_sync(
                 client,
                 f"{company} {location} instagram".strip(),
-                max_results=5,
+                max_results=6,
             )
             for url in ig_urls:
                 username = extract_username(url) or ""
@@ -312,21 +327,132 @@ async def discover_competitors(
                     industry=industry,
                 )
 
-    ig_fn = lambda query: _search_instagram_profiles_sync(client, query)
-    ig_results = await run_limited_searches(instagram_queries, ig_fn, concurrency=3)
+    ig_fn = lambda query: _search_instagram_profiles_sync(client, query, max_results=10)
+    ig_results = await run_limited_searches(instagram_queries, ig_fn, concurrency=4)
     for query, urls in ig_results.items():
         for url in urls:
             username = extract_username(url) or ""
             _add_candidate(
                 candidate_pool,
                 username,
-                source="llm_query" if intel.source.startswith("llm") else "instagram_search",
+                source="instagram_search",
                 discovered_by=query,
                 region=normalized_region,
                 country=country,
                 city=city,
                 industry=industry,
             )
+
+
+async def discover_competitors(
+    *,
+    company_name: str,
+    industry: str | None = None,
+    category: str | None = None,
+    region: str | None = None,
+    country: str | None = None,
+    city: str | None = None,
+    keywords: list[str] | None = None,
+    company_description: str | None = None,
+    company_profile: str | None = None,
+    company_signals: dict[str, Any] | None = None,
+    company_username: str | None = None,
+    company_website: str | None = None,
+    exclude_usernames: list[str] | None = None,
+    limit: int = 50,
+    pool_size: int | None = None,
+) -> tuple[list[dict], dict[str, Any]]:
+    normalized_region = normalize_region(region)
+    location = build_location_label(region=region, country=country, city=city)
+    target_pool = pool_size or max(limit * 4, 120)
+
+    intel = await build_competitor_intelligence(
+        company_name=company_name,
+        region=region or "Global",
+        company_profile=company_profile or company_description or "",
+        company_signals=company_signals,
+    )
+
+    signals = company_signals or {}
+    services = list(
+        dict.fromkeys(
+            [
+                *(intel.target_keywords or [])[:8],
+                *(signals.get("flagship_services") or []),
+                *(signals.get("services") or []),
+                industry or "",
+                category or "",
+            ]
+        )
+    )
+    services = [item for item in services if item]
+
+    filters_applied = {
+        "region": normalized_region,
+        "country": country,
+        "city": city,
+        "industry": industry,
+        "category": category,
+        "keywords": keywords or [],
+        "competitor_limit": limit,
+        "competitor_pool_target": target_pool,
+        "company_signals": company_signals or {},
+        "competitor_intelligence": intel.to_dict(),
+        "matching_mode": "smart",
+    }
+
+    if not config.TRAVILY_API_KEY:
+        logger.warning("TRAVILY_API_KEY is not configured; competitor discovery disabled")
+        return [], filters_applied
+
+    client = TavilyClient(api_key=config.TRAVILY_API_KEY)
+    candidate_pool: dict[str, dict] = {}
+
+    web_queries = intel.search_queries[:25]
+    instagram_queries = intel.instagram_queries[:35]
+
+    await _collect_candidates_from_searches(
+        client=client,
+        candidate_pool=candidate_pool,
+        web_queries=web_queries,
+        instagram_queries=instagram_queries,
+        normalized_region=normalized_region,
+        country=country,
+        city=city,
+        industry=industry,
+        location=location,
+    )
+
+    round_index = 1
+    while len(candidate_pool) < target_pool and round_index < 4:
+        round_index += 1
+        extra_web, extra_ig = _build_expansion_queries(
+            intel=intel,
+            location=location,
+            services=services,
+            region=region,
+            city=city,
+            round_index=round_index,
+        )
+        if not extra_web and not extra_ig:
+            break
+        logger.info(
+            "Competitor discovery expansion round %s (pool=%s target=%s)",
+            round_index,
+            len(candidate_pool),
+            target_pool,
+        )
+        await _collect_candidates_from_searches(
+            client=client,
+            candidate_pool=candidate_pool,
+            web_queries=extra_web,
+            instagram_queries=extra_ig,
+            normalized_region=normalized_region,
+            country=country,
+            city=city,
+            industry=industry,
+            location=location,
+        )
 
     exclude = build_exclude_handles(
         company_name=company_name,
@@ -350,15 +476,17 @@ async def discover_competitors(
     filters_applied["search_queries"] = {
         "web_queries": web_queries,
         "instagram_queries": instagram_queries,
+        "expansion_rounds": round_index - 1,
     }
     filters_applied["candidate_pool_size"] = len(candidates)
 
     logger.info(
-        "Smart discovery found %s Instagram candidate(s) for company=%s location=%s (intel=%s)",
+        "Smart discovery found %s Instagram candidate(s) for company=%s location=%s (intel=%s pool_target=%s)",
         len(candidates),
         company_name,
         location or "global",
         intel.source,
+        target_pool,
     )
 
     return candidates, filters_applied

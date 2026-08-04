@@ -1,6 +1,7 @@
 import logging
+from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.Nodes.common import HASHTAG_RE, MENTION_RE
-from agents.trend.state.trend_state import TrendState
+from agents.competitor.state.competitor_state import CompetitorState
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ def _first_int(post: dict, *keys: str) -> int:
     return 0
 
 
-async def ExtractPostDataNode(state: TrendState) -> TrendState:
+async def ExtractPostDataNode(state: CompetitorState) -> CompetitorState:
     if state.get("error"):
         state["processed_posts"] = []
         return state

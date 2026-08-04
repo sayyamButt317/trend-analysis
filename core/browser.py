@@ -3,13 +3,70 @@
 import asyncio
 import json
 import logging
+import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
 
 from .exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
+
+def configure_windows_event_loop() -> None:
+    """Use ProactorEventLoop on Windows so asyncio subprocess works (Playwright)."""
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
+
+def playwright_subprocess_supported() -> bool:
+    """Return False when the active loop cannot spawn subprocesses (Playwright on Windows)."""
+    if sys.platform != "win32":
+        return True
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return isinstance(
+            asyncio.get_event_loop_policy(),
+            asyncio.WindowsProactorEventLoopPolicy,
+        )
+    loop_name = type(loop).__name__
+    if "Selector" in loop_name:
+        return False
+    # Inside FastAPI/uvicorn on Windows, prefer the thread runner even with Proactor.
+    return False
+
+
+async def run_async_playwright_in_thread(
+    coro_factory: Callable[[], Awaitable[T]],
+) -> T:
+    """
+    Run Playwright async work in a dedicated thread with a Proactor event loop.
+
+    Uvicorn/FastAPI on Windows often uses SelectorEventLoop, which raises
+    NotImplementedError for Playwright's subprocess launch.
+    """
+
+    def _runner() -> T:
+        configure_windows_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(coro_factory())
+        finally:
+            try:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
+            loop.close()
+
+    return await asyncio.to_thread(_runner)
 
 
 class BrowserManager:

@@ -1,10 +1,11 @@
 from collections import Counter
 
+from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.Nodes.common import GENERIC_HASHTAGS
 from agents.trend.state.trend_state import TrendState
 
 
-async def ExtractHashtagsNode(state: TrendState) -> TrendState:
+async def ExtractHashtagsNode(state: CompetitorState) -> CompetitorState:
     counter: Counter[str] = Counter()
     creators_by_tag: dict[str, set[str]] = {}
 

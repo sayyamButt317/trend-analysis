@@ -1,8 +1,8 @@
 from agents.trend.services.content_analyzer import build_market_content_usage
-from agents.trend.state.trend_state import TrendState
+from agents.competitor.state.competitor_state import CompetitorState
 
 
-async def GenerateCompetitorSummaryNode(state: TrendState) -> TrendState:
+async def GenerateCompetitorSummaryNode(state: CompetitorState) -> CompetitorState:
     config = state.get("config") or {}
     company = config.get("company") or {}
     company_name = company.get("name") or config.get("company_name") or "your company"
@@ -61,6 +61,19 @@ async def GenerateCompetitorSummaryNode(state: TrendState) -> TrendState:
     else:
         lines.append("No content mix could be computed from competitor posts.")
 
+    gaps = state.get("gap_analysis") or {}
+    if gaps.get("summary"):
+        lines.append(gaps["summary"])
+
+    recs = state.get("recommendations") or []
+    for rec in recs[:3]:
+        lines.append(f"Recommendation ({rec.get('priority')}): {rec.get('title')} — {rec.get('detail')}")
+
     state["competitor_summary"] = " ".join(lines)
     state["trend_summary"] = state["competitor_summary"]
+    state["ai_report"] = state.get("ai_report") or {
+        "summary": state["competitor_summary"],
+        "gap_analysis": gaps,
+        "recommendations": recs,
+    }
     return state

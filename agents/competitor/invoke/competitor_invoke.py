@@ -36,6 +36,14 @@ async def competitorAnalysisAgent(
         "content_mix": [],
         "competitor_summary": "",
         "trend_summary": "",
+        "company_profile": {},
+        "search_intelligence": {},
+        "discovery_candidates": [],
+        "verified_competitors": [],
+        "similarity_scores": [],
+        "gap_analysis": {},
+        "recommendations": [],
+        "ai_report": {},
     }
 
     try:
@@ -67,6 +75,12 @@ async def competitorAnalysisAgent(
             summary=final_state.get("competitor_summary") or "",
             meta=meta,
             error=final_state.get("error"),
+            company_profile=final_state.get("company_profile"),
+            search_intelligence=final_state.get("search_intelligence"),
+            gap_analysis=final_state.get("gap_analysis"),
+            recommendations=final_state.get("recommendations"),
+            ai_report=final_state.get("ai_report"),
+            similarity_scores=final_state.get("similarity_scores"),
         )
     except Exception as exc:
         duration_sec = round(time.time() - start_time, 3)

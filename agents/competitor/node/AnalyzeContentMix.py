@@ -2,7 +2,7 @@ from collections import Counter, defaultdict
 
 from agents.trend.Nodes.common import TOPIC_KEYWORDS
 from agents.trend.services.content_analyzer import enrich_content_insights
-from agents.trend.state.trend_state import TrendState
+from agents.competitor.state.competitor_state import CompetitorState
 
 
 def normalize_media_type(post: dict) -> str:
@@ -65,7 +65,7 @@ def _build_base_content_profile(username: str, posts: list[dict]) -> dict:
     }
 
 
-async def AnalyzeContentMixNode(state: TrendState) -> TrendState:
+async def AnalyzeContentMixNode(state: CompetitorState) -> CompetitorState:
     by_competitor: dict[str, list[dict]] = defaultdict(list)
     for post in state.get("processed_posts") or []:
         username = post.get("username")

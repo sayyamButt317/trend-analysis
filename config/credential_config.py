@@ -7,7 +7,10 @@ load_dotenv()
 
 class Config(BaseModel):
     OPENAI_API_KEY: str = Field(default=os.getenv("OPENAI_API_KEY"))
-    OPENAI_MODEL_NAME: str = Field(default=os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini")
+    OPENAI_MODEL_NAME: str = Field(
+        default=os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini",
+        description="Use gpt-4o-mini or gpt-4o. Invalid values like gpt-5.5 are auto-corrected.",
+    )
 
     INSTAGRAM_APP_ID: str = Field(default=os.getenv("INSTAGRAM_APP_ID"))
     INSTAGRAM_APP_SECRET: str = Field(default=os.getenv("INSTAGRAM_APP_SECRET"))
@@ -68,6 +71,7 @@ class Config(BaseModel):
     SUPABASE_TABLE_TRENDS: str = Field(
         default=os.getenv("SUPABASE_TABLE_TRENDS") or "trends"
     )
+    FIRECRAWL_API_KEY: str = Field(default=os.getenv("FIRECRAWL_API_KEY"))
 
 
 config = Config()

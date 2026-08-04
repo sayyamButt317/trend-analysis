@@ -1,7 +1,7 @@
 from collections import defaultdict
 
 from agents.trend.Nodes.common import TOPIC_KEYWORDS
-from agents.trend.state.trend_state import TrendState
+from agents.competitor.state.competitor_state import CompetitorState
 
 
 def TopiForText(text: str) -> str:
@@ -12,7 +12,7 @@ def TopiForText(text: str) -> str:
     return "General"
 
 
-async def ClassifyTopicsNode(state: TrendState) -> TrendState:
+async def ClassifyTopicsNode(state: CompetitorState) -> CompetitorState:
     topic_posts: dict[str, list[dict]] = defaultdict(list)
 
     for post in state.get("processed_posts") or []:

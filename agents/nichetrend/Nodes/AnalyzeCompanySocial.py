@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 async def AnalyzeCompanySocialNode(state: TrendState) -> TrendState:
     config = state.get("config") or {}
-    if config.get("agent_mode") != "company_trend":
+    if config.get("agent_mode") != "niche_trend":
         return state
 
     company = config.get("company") or {}
@@ -54,10 +54,10 @@ async def AnalyzeCompanySocialNode(state: TrendState) -> TrendState:
     state["company_analysis"] = analysis
     state["company_posts"] = analysis.get("instagram_posts") or []
     state["linkedin_posts"] = analysis.get("linkedin_posts") or []
-    state["pain_points"] = analysis.get("pain_points") or []
+    state["pain_points"] = analysis.get("audience_pain_points") or analysis.get("pain_points") or []
 
     logger.info(
-        "Company social analysis: IG=@%s LinkedIn=%s posts=%s/%s pain_points=%s",
+        "Niche company social analysis: IG=@%s LinkedIn=%s posts=%s/%s pain_points=%s",
         handles.get("instagram_username") or "none",
         handles.get("linkedin_url") or "none",
         len(analysis.get("instagram_posts") or []),

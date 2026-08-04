@@ -37,3 +37,12 @@ class TrendState(TypedDict, total=False):
 
     error: Optional[str]
     _meta: dict[str, Any]
+
+    company_profile: dict[str, Any]
+    search_intelligence: dict[str, Any]
+    discovery_candidates: list[dict[str, Any]]
+    verified_competitors: list[dict[str, Any]]
+    similarity_scores: list[dict[str, Any]]
+    gap_analysis: dict[str, Any]
+    recommendations: list[dict[str, Any]]
+    ai_report: dict[str, Any]

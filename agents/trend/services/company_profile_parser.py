@@ -189,9 +189,24 @@ def _extract_name_from_profile(profile: str, fallback: str | None = None) -> str
             return cleaned
 
     prefix_match = re.match(
-        r"^([A-Za-z0-9][A-Za-z0-9 &.,'-]{1,70}?(?:\s+(?:LLC|Inc|Ltd|Corporation|Pvt\.?|L\.L\.C\.))?)",
+        r"^([A-Za-z0-9][A-Za-z0-9'-]{2,60})\s+(LLC|Inc|Ltd|Corporation|Pvt\.?|L\.L\.C\.)\b",
         profile_text,
         re.I,
+    )
+    if prefix_match:
+        return f"{prefix_match.group(1).strip()} {prefix_match.group(2).strip()}"
+
+    name_before_verb = re.match(
+        r"^([A-Za-z0-9][A-Za-z0-9 &.,'-]{2,70}?)\s+(?:is|was|are|has|provides|offers|specializes)\b",
+        profile_text,
+        re.I,
+    )
+    if name_before_verb:
+        return name_before_verb.group(1).strip()
+
+    prefix_match = re.match(
+        r"^([A-Za-z0-9][A-Za-z0-9 &.,'-]{2,70})",
+        profile_text,
     )
     if prefix_match:
         return prefix_match.group(1).strip()

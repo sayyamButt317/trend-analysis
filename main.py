@@ -1,4 +1,6 @@
 import logging
+import sys
+import asyncio
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -9,6 +11,9 @@ from fastapi.security import HTTPBearer
 
 from core.exception_handlers import register_exception_handlers
 from routes import api_router
+
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
