@@ -381,31 +381,6 @@ def _user_profile_section(
     }
 
 
-PIPELINE_STAGES = [
-    "understand_company",
-    "analyze_user_instagram",
-    "analyze_user_linkedin",
-    "search_intelligence",
-    "discovery_pipeline",
-    "find_competitors",
-    "discover_competitors",
-    "analyze_competitor_website",
-    "analyze_competitor_instagram",
-    "analyze_competitor_linkedin",
-    "extract_post_data",
-    "filter_duplicate_posts",
-    "calculate_engagement",
-    "extract_hashtags",
-    "classify_topics",
-    "analyze_content_mix",
-    "similarity_analysis",
-    "gap_analysis",
-    "competitor_intelligence",
-    "recommendations",
-    "generate_competitor_summary",
-]
-
-
 def build_analysis_sections(
     *,
     company: dict[str, Any],
@@ -432,22 +407,6 @@ def build_analysis_sections(
     user_li_block = (social.get("user_linkedin") or {})
 
     return {
-        "pipeline": {
-            "order": [
-                "1_analyze_user_profile",
-                "2_find_competitors",
-                "3_analyze_competitor_social",
-                "4_strategy_and_gaps",
-            ],
-            "stages": PIPELINE_STAGES,
-            "description": (
-                "User company + Instagram + LinkedIn are analyzed first. "
-                "Competitors are discovered using that profile, then their "
-                "Instagram and LinkedIn are analyzed. "
-                "Final sections compare you vs the market."
-            ),
-            "platforms": ["instagram", "linkedin"],
-        },
         "user_profile": _user_profile_section(
             company_profile=profile,
             company_analysis=company_analysis,
