@@ -71,13 +71,10 @@ async def ProposeCompetitorsNode(state: CompetitorState) -> CompetitorState:
     company_profile = state.get("company_profile") or company
     company_analysis = state.get("company_analysis") or {}
     region = (filters.get("region") or config.get("region") or "").strip()
-    competitor_limit = max(
-        int(
-            filters.get("competitor_limit")
-            or config.get("competitor_limit")
-            or MIN_COMPETITORS
-        ),
-        MIN_COMPETITORS,
+    competitor_limit = int(
+        filters.get("competitor_limit")
+        or config.get("competitor_limit")
+        or MIN_COMPETITORS
     )
     filters["competitor_limit"] = competitor_limit
     config["competitor_limit"] = competitor_limit

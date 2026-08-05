@@ -114,7 +114,7 @@ class CompetitorAnalysisRequest(BaseModel):
         default=None,
         ge=1,
         le=50,
-        description="Max competitors to analyze (minimum 10 locally; default 10).",
+        description="Max competitors to analyze (from request; default 10 locally, 5 on Vercel).",
     )
     post_limit: Optional[int] = Field(
         default=None,
@@ -186,10 +186,10 @@ class CompetitorAnalysisRequest(BaseModel):
     def to_agent_config(self) -> dict[str, Any]:
         company = self._company_with_socials()
         profile = runtime_profile()
-        min_competitors = int(profile.get("min_competitors") or 10)
-        competitor_limit = max(
-            int(self.competitor_limit or profile["competitor_limit"] or min_competitors),
-            min_competitors,
+        competitor_limit = int(
+            self.competitor_limit
+            if self.competitor_limit is not None
+            else profile.get("competitor_limit") or 10
         )
         post_limit = self.post_limit or profile["post_limit"]
         exclude_usernames: list[str] = []

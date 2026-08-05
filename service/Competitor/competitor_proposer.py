@@ -229,7 +229,7 @@ class CompetitorProposerService:
         if not (config.OPENAI_API_KEY or "").strip():
             raise ValueError("OPENAI_API_KEY is not configured")
 
-        target = max(int(limit or MIN_COMPETITORS), MIN_COMPETITORS)
+        target = max(1, int(limit or MIN_COMPETITORS))
         dna = _build_user_dna_blob(
             company=company,
             company_profile=company_profile,
