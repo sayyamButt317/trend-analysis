@@ -4,6 +4,7 @@ from typing import Any
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from service.Competitor.website_crawler import WebsiteCrawlerService
+from service.Competitor.firecrawl_service import is_scrapeable_website
 
 logger = logging.getLogger(__name__)
 
@@ -39,11 +40,19 @@ async def analyze_competitor_website_node(state: CompetitorState) -> CompetitorS
     )
     enriched: list[dict[str, Any]] = []
     crawled = 0
+    skipped_social = 0
     website_records: list[dict[str, Any]] = []
 
     for competitor in competitors:
         item = dict(competitor)
         website = (item.get("website") or "").strip()
+        if website and not is_scrapeable_website(website):
+            skipped_social += 1
+            item["website"] = None
+            item.setdefault("social_warnings", []).append(
+                f"Ignored non-website URL for crawl: {website}"
+            )
+            website = ""
         if website and crawled < max_crawls:
             name = item.get("name") or item.get("username") or "Competitor"
             try:
@@ -77,6 +86,7 @@ async def analyze_competitor_website_node(state: CompetitorState) -> CompetitorS
         "3_competitor_social",
         "Competitor website crawl finished",
         crawled=crawled,
+        skipped_social=skipped_social,
         total=len(competitors),
     )
     return state
