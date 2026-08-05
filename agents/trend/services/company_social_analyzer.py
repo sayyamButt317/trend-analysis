@@ -6,12 +6,10 @@ from typing import Any
 import httpx
 
 from agents.trend.services.company_profile_parser import extract_social_handles, parse_company_profile
-from agents.trend.services.content_analyzer import (
-    classify_content_category,
-    enrich_content_insights,
-    normalize_media_type,
-)
-from agents.trend.services.instagram_discovery import fetch_instagram_profile
+from service.AnalyzeUserInstagram.contentstrategy import build_instagram_analysis
+from service.AnalyzeUserInstagram.fetchprofile import fetch_user_instagram_profile, posts_from_profile
+from service.AnalyzeUserLinkedIn import fetch_linkedin_company_posts as _fetch_linkedin_company_posts
+from service.AnalyzeUserLinkedIn import normalize_linkedin_url
 from config.credential_config import config
 from scrapper.instagram_finder.extractor import extract_username
 from scrapper.tavily_retry import is_tavily_unreachable_error, tavily_search_with_retry
@@ -25,7 +23,6 @@ PAIN_POINT_PATTERNS = (
     r"\b(cost[s]? too much|too expensive|time.?consuming|inefficien(?:t|cy)|manual process)\b",
 )
 
-# Company promotional noise — not audience pain points
 COMPANY_SELF_PATTERNS = (
     r"\b(we are hiring|we're hiring|join our team|our office|our culture|we're excited)\b",
     r"\b(proud to announce|we announce|follow us|dm us|book a call with us)\b",
@@ -47,25 +44,13 @@ LINKEDIN_URL_RE = re.compile(
 
 
 def _normalize_linkedin_url(url_or_slug: str) -> str | None:
-    value = (url_or_slug or "").strip().rstrip("/")
-    if not value:
-        return None
-    if "linkedin.com" in value:
-        match = LINKEDIN_URL_RE.search(value if value.startswith("http") else f"https://{value.lstrip('www.')}")
-        if match:
-            kind, slug = match.group(1).lower(), match.group(2)
-            return f"https://www.linkedin.com/{kind}/{slug}/"
-        if "/company/" in value or "/in/" in value:
-            return value if value.startswith("http") else f"https://www.{value.lstrip('www.')}"
-        return None
-    return f"https://www.linkedin.com/company/{value}/"
+    return normalize_linkedin_url(url_or_slug)
 
 
 def _linkedin_posts_path(linkedin_url: str) -> str:
-    normalized = linkedin_url.rstrip("/")
-    if "/in/" in normalized:
-        return f"{normalized}/recent-activity/all/"
-    return f"{normalized}/posts/"
+    from service.AnalyzeUserLinkedIn import linkedin_posts_path
+
+    return linkedin_posts_path(linkedin_url)
 
 
 async def _resolve_handles_via_tavily(
@@ -73,6 +58,7 @@ async def _resolve_handles_via_tavily(
     region: str | None,
     *,
     existing: dict[str, str | None],
+    resolve_linkedin: bool = True,
 ) -> dict[str, str | None]:
     api_key = (config.TRAVILY_API_KEY or "").strip()
     if not api_key:
@@ -84,7 +70,7 @@ async def _resolve_handles_via_tavily(
     queries: list[tuple[str, str]] = []
     if not existing.get("instagram_username"):
         queries.append(("instagram", f'{company_name}{region_suffix} official instagram account site:instagram.com'))
-    if not existing.get("linkedin_url"):
+    if resolve_linkedin and not existing.get("linkedin_url"):
         queries.append(("linkedin", f'{company_name}{region_suffix} linkedin company page site:linkedin.com/company'))
 
     resolved = dict(existing)
@@ -96,6 +82,7 @@ async def _resolve_handles_via_tavily(
                 query=query,
                 search_depth="advanced",
                 max_results=5,
+                count_as_linkedin=(platform == "linkedin"),
             )
             if not response:
                 continue
@@ -123,6 +110,7 @@ async def resolve_company_social_handles(
     company: dict[str, Any],
     *,
     region: str | None = None,
+    resolve_linkedin: bool = True,
 ) -> dict[str, str | None]:
     profile_text = company.get("profile") or company.get("description") or ""
     handles = extract_social_handles(profile_text)
@@ -134,8 +122,15 @@ async def resolve_company_social_handles(
     handles["linkedin_username"] = handles.get("linkedin_username") or company.get("linkedin_username")
 
     company_name = (company.get("name") or "").strip()
-    if company_name and (not handles.get("instagram_username") or not handles.get("linkedin_url")):
-        handles = await _resolve_handles_via_tavily(company_name, region, existing=handles)
+    needs_instagram = not handles.get("instagram_username")
+    needs_linkedin = resolve_linkedin and not handles.get("linkedin_url")
+    if company_name and (needs_instagram or needs_linkedin):
+        handles = await _resolve_handles_via_tavily(
+            company_name,
+            region,
+            existing=handles,
+            resolve_linkedin=resolve_linkedin,
+        )
     return handles
 
 
@@ -408,198 +403,23 @@ Return ONLY JSON:
         return {"pain_points": [], "audience_needs": [], "content_themes": []}
 
 
-async def _fetch_linkedin_posts_tavily(
-    linkedin_url: str,
-    company_name: str,
-    *,
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    api_key = (config.TRAVILY_API_KEY or "").strip()
-    if not api_key:
-        return []
-
-    from tavily import TavilyClient
-
-    posts: list[dict[str, Any]] = []
-    try:
-        client = TavilyClient(api_key=api_key)
-        if hasattr(client, "extract"):
-            posts_path = _linkedin_posts_path(linkedin_url)
-            extract_result = client.extract(urls=[posts_path])
-            for chunk in extract_result.get("results") or []:
-                content = chunk.get("raw_content") or chunk.get("content") or ""
-                if content and len(content) > 100:
-                    posts.append(
-                        {
-                            "text": content[:2000],
-                            "source": "linkedin_extract",
-                            "linkedin_url": linkedin_url,
-                        }
-                    )
-
-        response = tavily_search_with_retry(
-            client,
-            query=f'site:linkedin.com/posts OR site:linkedin.com/feed "{company_name}"',
-            search_depth="advanced",
-            max_results=limit,
-        )
-        for item in (response or {}).get("results") or []:
-            content = item.get("content") or item.get("raw_content") or ""
-            if not content or len(content) < 60:
-                continue
-            posts.append(
-                {
-                    "text": content[:1500],
-                    "title": item.get("title"),
-                    "linkedin_url": item.get("url") or linkedin_url,
-                    "source": "linkedin_tavily",
-                }
-            )
-    except Exception as exc:
-        if not is_tavily_unreachable_error(exc):
-            logger.warning("LinkedIn Tavily fetch failed: %s", exc)
-    return posts[:limit]
-
-
-async def _fetch_linkedin_posts_playwright_impl(
-    linkedin_url: str,
-    *,
-    limit: int = 10,
-) -> list[dict[str, Any]]:
-    email, password = None, None
-    try:
-        from core.auth import load_credentials_from_env, login_with_credentials
-        from core.browser import BrowserManager
-
-        email, password = load_credentials_from_env()
-        if not email or not password:
-            return []
-    except ImportError:
-        return []
-
-    posts: list[dict[str, Any]] = []
-    async with BrowserManager(headless=True) as browser:
-        await login_with_credentials(browser.page, email, password)
-        posts_url = _linkedin_posts_path(linkedin_url)
-        await browser.page.goto(posts_url, wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(3)
-        posts_data = await browser.page.evaluate(
-            """() => {
-            const results = [];
-            const html = document.body.innerHTML;
-            const urnMatches = [...html.matchAll(/urn:li:activity:(\\d+)/g)];
-            const seen = new Set();
-            for (const match of urnMatches) {
-                const urn = match[0];
-                if (seen.has(urn)) continue;
-                seen.add(urn);
-                const el = document.querySelector(`[data-urn="${urn}"]`);
-                const text = el ? (el.innerText || '').trim() : '';
-                if (text && text.length > 30) {
-                    results.push({ urn, text: text.slice(0, 1500) });
-                }
-                if (results.length >= 10) break;
-            }
-            return results;
-        }"""
-        )
-        for item in posts_data or []:
-            posts.append(
-                {
-                    "text": item.get("text"),
-                    "urn": item.get("urn"),
-                    "linkedin_url": posts_url,
-                    "source": "linkedin_playwright",
-                }
-            )
-    return posts[:limit]
-
-
-async def _fetch_linkedin_posts_playwright(linkedin_url: str, *, limit: int = 10) -> list[dict[str, Any]]:
-    try:
-        from core.browser import playwright_subprocess_supported, run_async_playwright_in_thread
-
-        if playwright_subprocess_supported():
-            return await _fetch_linkedin_posts_playwright_impl(linkedin_url, limit=limit)
-        logger.info("Running LinkedIn Playwright fetch in background thread (Windows event loop fix)")
-        return await run_async_playwright_in_thread(
-            lambda: _fetch_linkedin_posts_playwright_impl(linkedin_url, limit=limit)
-        )
-    except Exception:
-        logger.debug("LinkedIn Playwright fetch unavailable", exc_info=True)
-    return []
-
-
 async def fetch_linkedin_company_posts(
-    linkedin_url: str,
     company_name: str,
     *,
+    linkedin_url: str | None = None,
     limit: int = 10,
     skip_playwright: bool = False,
 ) -> list[dict[str, Any]]:
-    normalized = _normalize_linkedin_url(linkedin_url)
-    if not normalized:
-        return []
-
-    posts: list[dict[str, Any]] = []
-    if not skip_playwright:
-        posts = await _fetch_linkedin_posts_playwright(normalized, limit=limit)
-    if not posts:
-        posts = await _fetch_linkedin_posts_tavily(normalized, company_name, limit=limit)
-    return posts
+    return await _fetch_linkedin_company_posts(
+        company_name,
+        linkedin_url=linkedin_url,
+        limit=limit,
+        skip_playwright=skip_playwright,
+    )
 
 
 def analyze_instagram_company_profile(profile: dict[str, Any], posts: list[dict[str, Any]]) -> dict[str, Any]:
-    insights = enrich_content_insights(posts, profile)
-    hashtags: list[str] = []
-    for post in posts:
-        for tag in post.get("hashtags") or []:
-            if isinstance(tag, dict):
-                hashtags.append(tag.get("tag") or tag.get("hashtag") or "")
-            else:
-                hashtags.append(str(tag))
-
-    from collections import Counter
-
-    tag_counts = Counter(tag for tag in hashtags if tag)
-    media_counts = Counter(normalize_media_type(post) for post in posts)
-    categories = Counter(
-        classify_content_category(post.get("caption") or post.get("text") or "", post.get("hashtags"))
-        for post in posts
-    )
-
-    bio = profile.get("biography") or profile.get("bio") or ""
-    focus_parts = (insights.get("content_focus") or "").split(", ") if insights.get("content_focus") else []
-    niche_keywords = list(
-        dict.fromkeys(
-            [
-                *focus_parts,
-                categories.most_common(1)[0][0] if categories else "",
-                profile.get("category") or "",
-            ]
-        )
-    )
-    niche_keywords = [item for item in niche_keywords if item and item != "General Brand"]
-
-    return {
-        "username": profile.get("username"),
-        "name": profile.get("name"),
-        "bio": bio,
-        "followers": profile.get("followers_count"),
-        "website": profile.get("website"),
-        "post_count": len(posts),
-        "primary_format": insights.get("primary_format"),
-        "primary_content_category": insights.get("primary_content_category"),
-        "content_focus": insights.get("content_focus"),
-        "top_hashtags": [{"tag": tag, "count": count} for tag, count in tag_counts.most_common(10)],
-        "media_mix": [{"format": fmt, "count": count} for fmt, count in media_counts.most_common()],
-        "content_categories": [{"category": cat, "count": count} for cat, count in categories.most_common(5)],
-        "posting_frequency": insights.get("posting_frequency") or {},
-        "avg_engagement_rate": insights.get("avg_engagement_rate"),
-        "detected_niche": niche_keywords[0] if niche_keywords else insights.get("primary_content_category"),
-        "niche_keywords": niche_keywords[:8],
-        "caption_style": insights.get("caption_style") or {},
-    }
+    return build_instagram_analysis(profile, posts)
 
 
 async def analyze_company_social_presence(
@@ -607,13 +427,15 @@ async def analyze_company_social_presence(
     *,
     region: str | None = None,
     post_limit: int = 15,
+    skip_discussion_search: bool = False,
+    skip_playwright: bool = False,
 ) -> dict[str, Any]:
     company_name = (company.get("name") or "").strip() or "Company"
     signals = company.get("company_signals")
     if not signals:
         signals = parse_company_profile(company.get("profile") or "", company=company).to_dict()
 
-    handles = await resolve_company_social_handles(company, region=region)
+    handles = await resolve_company_social_handles(company, region=region, resolve_linkedin=True)
     warnings: list[str] = []
 
     instagram_username = handles.get("instagram_username")
@@ -624,10 +446,10 @@ async def analyze_company_social_presence(
     instagram_analysis: dict[str, Any] | None = None
 
     if instagram_username:
-        profile = await fetch_instagram_profile(instagram_username, post_limit=post_limit)
+        profile = await fetch_user_instagram_profile(instagram_username, post_limit=post_limit)
         if profile:
             instagram_profile = profile
-            instagram_posts = profile.get("posts") or []
+            instagram_posts = posts_from_profile(profile, handle=instagram_username)
             for post in instagram_posts:
                 post["username"] = instagram_username
                 post["is_company_post"] = True
@@ -638,16 +460,21 @@ async def analyze_company_social_presence(
         warnings.append("No Instagram username found in company data.")
 
     linkedin_posts: list[dict[str, Any]] = []
-    if linkedin_url:
+    if company_name:
         linkedin_posts = await fetch_linkedin_company_posts(
-            linkedin_url,
             company_name,
+            linkedin_url=linkedin_url,
             limit=min(post_limit, 10),
+            skip_playwright=skip_playwright,
         )
         if not linkedin_posts:
-            warnings.append(f"Could not fetch LinkedIn posts from {linkedin_url}.")
+            from service.AnalyzeUserLinkedIn import build_company_urls_from_name
+
+            warnings.append(
+                f"Could not fetch LinkedIn posts from {build_company_urls_from_name(company_name)['posts_url']}."
+            )
     else:
-        warnings.append("No LinkedIn company URL found in company data.")
+        warnings.append("No company name found for LinkedIn analysis.")
 
     post_texts = [post.get("text") or "" for post in linkedin_posts if post.get("text")]
     instagram_texts = [
@@ -669,13 +496,15 @@ async def analyze_company_social_presence(
         post_texts + instagram_texts,
         limit=8,
     )
-    discussion_pain_points = await _fetch_audience_pain_discussions(
-        company_name=company_name,
-        niche=detected_niche,
-        services=list(signals.get("flagship_services") or signals.get("services") or []) if isinstance(signals, dict) else [],
-        region=region,
-        limit=6,
-    )
+    discussion_pain_points: list[dict[str, Any]] = []
+    if not skip_discussion_search:
+        discussion_pain_points = await _fetch_audience_pain_discussions(
+            company_name=company_name,
+            niche=detected_niche,
+            services=list(signals.get("flagship_services") or signals.get("services") or []) if isinstance(signals, dict) else [],
+            region=region,
+            limit=6,
+        )
 
     if isinstance(llm_result, dict):
         pain_points = llm_result.get("pain_points") or []

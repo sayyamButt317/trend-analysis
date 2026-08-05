@@ -2,7 +2,7 @@ import re
 from typing import Any
 
 
-DEFAULT_COMPETITOR_TARGET = 50
+DEFAULT_COMPETITOR_TARGET = 10
 MIN_AUTHENTIC_MATCH_SCORE = 0.38
 
 NOISE_BIO_TERMS = frozenset(
@@ -56,8 +56,8 @@ REGION_TERMS: dict[str, tuple[str, ...]] = {
     "dubai": ("dubai", "uae", "abu dhabi", "united arab emirates"),
     "saudi arabia": ("saudi", "riyadh", "jeddah", "ksa", "saudi arabia"),
     "sa": ("saudi", "riyadh", "jeddah", "ksa"),
-    "pakistan": ("pakistan", "lahore", "karachi", "islamabad", "rawalpindi"),
-    "pk": ("pakistan", "lahore", "karachi", "islamabad"),
+    "pakistan": ("pakistan", "lahore", "karachi", "islamabad", "rawalpindi", "faisalabad", "software house", "pk"),
+    "pk": ("pakistan", "lahore", "karachi", "islamabad", "software house"),
     "india": ("india", "bangalore", "bengaluru", "mumbai", "delhi", "hyderabad", "pune"),
     "uk": ("uk", "united kingdom", "london", "england", "scotland"),
     "united kingdom": ("uk", "united kingdom", "london", "england"),

@@ -5,9 +5,12 @@ from datetime import datetime, timezone
 from html import unescape
 from typing import Any
 from tavily import TavilyClient
-from scrapper.tavily_retry import tavily_search_with_retry
+from scrapper.tavily_retry import (
+    is_tavily_unreachable_error,
+    tavily_extract_counted,
+    tavily_search_with_retry,
+)
 import httpx
-
 from agents.trend.services.google_trend_fetcher import fetch_google_trends
 from agents.trend.services.social_trend_fetcher import (
     classify_source,
@@ -26,7 +29,6 @@ from agents.trend.services.web_trend_parser import (
 )
 from agents.trend.services.web_trend_sources import TAVILY_TREND_QUERIES, TREND_SOURCES
 from config.credential_config import config
-from scrapper.tavily_retry import is_tavily_unreachable_error
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +84,7 @@ def _fetch_with_tavily_extract(url: str, session: _TavilySession) -> str:
 
         client = TavilyClient(api_key=api_key)
         if hasattr(client, "extract"):
-            result = client.extract(urls=[url])
+            result = tavily_extract_counted(client, urls=[url])
             chunks = result.get("results") or []
             if chunks:
                 return chunks[0].get("raw_content") or chunks[0].get("content") or ""

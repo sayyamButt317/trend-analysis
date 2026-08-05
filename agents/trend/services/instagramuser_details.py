@@ -3,6 +3,7 @@ import logging
 import time
 import httpx
 from config.credential_config import config
+from core.api_call_counter import record_api_call
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ async def ExtractInfluencerDetailsFromInstagram(username: str, *, post_limit: in
         start_time = time.time()
         try:
             async with httpx.AsyncClient(timeout=_api_timeout()) as client:
+                record_api_call("instagram")
                 response = await client.get(url, params=params)
 
             if response.status_code != 200:

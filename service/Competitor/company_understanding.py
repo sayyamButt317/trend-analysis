@@ -1,5 +1,4 @@
 import logging
-
 from config.credential_config import config
 from models.company import CompanyInput, CompanyProfile
 from prompts.company_analysis import SYSTEM_PROMPT

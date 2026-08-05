@@ -31,10 +31,11 @@ REGION_ALIASES: dict[str, str] = {
     "us": "United States",
     "uk": "United Kingdom",
     "africa": "Africa",
+    "pk": "Pakistan",
+    "pakistan": "Pakistan",
+    "south asia": "South Asia",
     "global": "Global",
 }
-
-COMPANY_SUFFIXES = (" LLC", " Inc", " Ltd", " Co", " Corporation", " Pvt", " L.L.C.")
 
 GCC_CITIES = ("Dubai", "Abu Dhabi", "Riyadh", "Jeddah", "Doha", "Kuwait City", "Muscat", "Manama")
 MENA_CITIES = ("Cairo", "Amman", "Beirut", "Casablanca")
@@ -86,7 +87,7 @@ def _build_expansion_queries(
             web.append(f"{comp_type} {location}")
             instagram.append(f"{comp_type} {location} instagram")
 
-    return list(dict.fromkeys(web))[:20], list(dict.fromkeys(instagram))[:25]
+    return list(dict.fromkeys(web))[:10], list(dict.fromkeys(instagram))[:12]
 
 
 def normalize_region(region: str | None) -> str | None:
@@ -133,7 +134,7 @@ def _extract_company_names_from_results(results: list[dict]) -> list[str]:
             cleaned = cleaned.strip(" -|,")
             if 3 <= len(cleaned) <= 80 and not cleaned.lower().startswith("top "):
                 names.append(cleaned)
-    return list(dict.fromkeys(names))[:8]
+    return list(dict.fromkeys(names))[:3]
 
 
 def _search_web_sync(client: TavilyClient, query: str, *, max_results: int = 8) -> list[dict]:
@@ -359,12 +360,12 @@ async def discover_competitors(
     company_username: str | None = None,
     company_website: str | None = None,
     exclude_usernames: list[str] | None = None,
-    limit: int = 50,
+    limit: int = 10,
     pool_size: int | None = None,
 ) -> tuple[list[dict], dict[str, Any]]:
     normalized_region = normalize_region(region)
     location = build_location_label(region=region, country=country, city=city)
-    target_pool = pool_size or max(limit * 4, 120)
+    target_pool = pool_size or max(limit * 2, 40)
 
     intel = await build_competitor_intelligence(
         company_name=company_name,
@@ -408,8 +409,8 @@ async def discover_competitors(
     client = TavilyClient(api_key=config.TRAVILY_API_KEY)
     candidate_pool: dict[str, dict] = {}
 
-    web_queries = intel.search_queries[:25]
-    instagram_queries = intel.instagram_queries[:35]
+    web_queries = intel.search_queries[:12]
+    instagram_queries = intel.instagram_queries[:15]
 
     await _collect_candidates_from_searches(
         client=client,
@@ -424,7 +425,7 @@ async def discover_competitors(
     )
 
     round_index = 1
-    while len(candidate_pool) < target_pool and round_index < 4:
+    while len(candidate_pool) < target_pool and round_index < 2:
         round_index += 1
         extra_web, extra_ig = _build_expansion_queries(
             intel=intel,

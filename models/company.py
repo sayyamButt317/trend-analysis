@@ -47,6 +47,39 @@ class CompanyProfile(BaseModel):
     embeddings: List[float] = Field(default_factory=list)
     source: str = "heuristic"
 
+    @field_validator(
+        "target_audience",
+        "products",
+        "services",
+        "features",
+        "technologies",
+        "keywords",
+        "countries",
+        "competitors_hint",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_str_lists(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return []
+            if "," in text:
+                return [part.strip() for part in text.split(",") if part.strip()]
+            return [text]
+        if isinstance(value, (list, tuple, set)):
+            # Guard against accidental character lists from a prior string→list cast.
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if items and all(len(item) == 1 for item in items) and len(items) > 8:
+                joined = "".join(items).strip()
+                if "," in joined:
+                    return [part.strip() for part in joined.split(",") if part.strip()]
+                return [joined] if joined else []
+            return items
+        return []
+
     def to_dict(self) -> Dict[str, Any]:
         return self.model_dump()
 

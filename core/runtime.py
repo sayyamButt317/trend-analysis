@@ -1,7 +1,4 @@
-"""Runtime profile helpers for local vs serverless (Vercel) deployments."""
-
 from __future__ import annotations
-
 import os
 from typing import Any
 
@@ -27,7 +24,6 @@ def _env_int(name: str, default: int) -> int:
 
 
 def runtime_profile() -> dict[str, Any]:
-    """Return deployment-specific limits and feature flags."""
     if is_serverless():
         return {
             "serverless": True,
@@ -37,20 +33,27 @@ def runtime_profile() -> dict[str, Any]:
             != "false",
             "skip_playwright": True,
             "discovery_candidate_multiplier": 2,
-            "max_tavily_queries": 8,
-            "max_firecrawl_queries": 4,
+            "max_tavily_queries": _env_int("MAX_TAVILY_QUERIES", 6),
+            "max_firecrawl_queries": _env_int("MAX_FIRECRAWL_QUERIES", 2),
+            "max_social_tavily_lookups": _env_int("MAX_SOCIAL_TAVILY_LOOKUPS", 10),
             "request_delay_seconds": 0.5,
             "max_duration_sec": _env_int("SERVERLESS_MAX_DURATION_SEC", 240),
+            "min_competitors": _env_int("SERVERLESS_MIN_COMPETITORS", 5),
         }
     return {
         "serverless": False,
-        "competitor_limit": _env_int("COMPETITOR_LIMIT", 50),
+        "competitor_limit": _env_int("COMPETITOR_LIMIT", 10),
         "post_limit": _env_int("COMPETITOR_POST_LIMIT", 10),
         "skip_linkedin": False,
         "skip_playwright": False,
-        "discovery_candidate_multiplier": 3,
-        "max_tavily_queries": 20,
-        "max_firecrawl_queries": 8,
+        "discovery_candidate_multiplier": 2,
+        "max_tavily_queries": _env_int("MAX_TAVILY_QUERIES", 10),
+        "max_firecrawl_queries": _env_int("MAX_FIRECRAWL_QUERIES", 4),
+        "max_social_tavily_lookups": _env_int("MAX_SOCIAL_TAVILY_LOOKUPS", 15),
         "request_delay_seconds": 1.0,
         "max_duration_sec": None,
+        "linkedin_page_delay_sec": 4.0,
+        "linkedin_max_pages_per_session": 6,
+        "linkedin_scrape_competitors": False,
+        "min_competitors": _env_int("MIN_COMPETITORS", 10),
     }

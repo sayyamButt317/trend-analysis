@@ -19,10 +19,10 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
     "/analyze",
     summary="Analyze competitors from company details + region",
     description=(
-        "Send company details + region. Optionally pass competitor names or @handles "
-        "to analyze specific accounts; otherwise uses smart matching to discover competitors. "
-        "On Vercel/serverless, defaults to 5 competitors to fit the 300s timeout — "
-        "pass `competitor_limit: 3` for faster runs."
+        "Send company details + region. Optionally pass `company_name`, `instagram_username`, "
+        "and/or `linkedin_url`. LinkedIn posts are fetched from "
+        "`/company/{slug}/posts/?feedView=all` built from your company name. "
+        "You may also pass competitor names or @handles to skip auto-discovery."
     ),
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):

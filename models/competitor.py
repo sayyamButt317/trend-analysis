@@ -5,14 +5,7 @@ from pydantic import BaseModel
 
 class SocialProfiles(BaseModel):
     instagram: Optional[str] = None
-
     linkedin: Optional[str] = None
-
-    reddit: Optional[str] = None
-
-    x: Optional[str] = None
-
-    youtube: Optional[str] = None
 
 
 class CompetitorCandidate(BaseModel):

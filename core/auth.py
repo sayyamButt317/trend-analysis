@@ -10,23 +10,22 @@ from dotenv import load_dotenv
 
 from .exceptions import AuthenticationError
 from .utils import detect_rate_limit
+from core.api_call_counter import record_api_call
 
 logger = logging.getLogger(__name__)
 
 
+def _mask_email(email: str) -> str:
+    if "@" not in email:
+        return "***"
+    local, domain = email.split("@", 1)
+    visible = local[:2] if len(local) >= 2 else local[:1]
+    return f"{visible}***@{domain}"
+
+
 async def warm_up_browser(page: Page) -> None:
-    """
-    Visit normal sites to gather cookies and appear more human-like.
-    
-    This helps avoid LinkedIn security checkpoints by establishing
-    a normal browsing pattern before visiting LinkedIn.
-    
-    Args:
-        page: Playwright page object
-    """
     sites = [
         'https://www.google.com',
-        'https://www.wikipedia.org',
         'https://www.github.com',
     ]
     
@@ -45,14 +44,6 @@ async def warm_up_browser(page: Page) -> None:
 
 
 def load_credentials_from_env() -> Tuple[Optional[str], Optional[str]]:
-    """
-    Load LinkedIn credentials from .env file.
-    
-    Supports both LINKEDIN_EMAIL/LINKEDIN_USERNAME and LINKEDIN_PASSWORD.
-    
-    Returns:
-        Tuple of (email, password) or (None, None) if not found
-    """
     load_dotenv()
     
     # Support both LINKEDIN_EMAIL and LINKEDIN_USERNAME
@@ -94,20 +85,17 @@ async def login_with_credentials(
             "Either pass email/password parameters or set LINKEDIN_EMAIL "
             "and LINKEDIN_PASSWORD in your .env file."
         )
-    
     # Warm up browser first to appear more human-like
     if warm_up:
         await warm_up_browser(page)
-    
     logger.info("Logging in to LinkedIn...")
     
     try:
         # Navigate to login page
+        record_api_call("linkedin", kind="playwright")
         await page.goto('https://www.linkedin.com/login', wait_until='domcontentloaded')
-        
         # Check for rate limiting
         await detect_rate_limit(page)
-        
         # Wait for login form
         try:
             await page.wait_for_selector('#username', timeout=timeout, state='visible')
@@ -120,9 +108,8 @@ async def login_with_credentials(
         # Fill in credentials
         await page.fill('#username', email)
         await page.fill('#password', password)
-        
         logger.debug("Credentials entered")
-        
+
         # Click sign in button
         await page.click('button[type="submit"]')
         
@@ -165,18 +152,35 @@ async def login_with_credentials(
         logged_in = False
         while (time.time() - start_time) * 1000 < 5000:
             if await is_logged_in(page):
-                logger.info("✓ Successfully logged in to LinkedIn")
+                logger.info(
+                    "LinkedIn login successful for %s (url=%s)",
+                    _mask_email(email),
+                    current_url,
+                )
                 logged_in = True
                 break
             await asyncio.sleep(0.5)  # Poll every 500ms
-        
+
         if not logged_in:
-            # Timeout: couldn't verify within 5s but may still be logged in
-            logger.warning(
-                "Could not verify login by finding navigation element. "
-                "Proceeding anyway..."
-            )
+            if "feed" in current_url or "mynetwork" in current_url:
+                logger.info(
+                    "LinkedIn login successful for %s (url=%s, nav verification skipped)",
+                    _mask_email(email),
+                    current_url,
+                )
+            else:
+                logger.warning(
+                    "Could not verify LinkedIn login for %s (url=%s). Proceeding anyway...",
+                    _mask_email(email),
+                    current_url,
+                )
     
+    except asyncio.CancelledError:
+        logger.warning(
+            "LinkedIn login interrupted for %s (server reload or request cancelled)",
+            _mask_email(email),
+        )
+        raise
     except PlaywrightTimeoutError as e:
         raise AuthenticationError(
             f"Login timed out: {e}. "
@@ -185,111 +189,78 @@ async def login_with_credentials(
     except Exception as e:
         if isinstance(e, AuthenticationError):
             raise
+        if isinstance(e, asyncio.CancelledError):
+            raise
         raise AuthenticationError(f"Unexpected error during login: {e}")
 
 
 async def login_with_cookie(page: Page, cookie_value: str) -> None:
-     """
-     Login to LinkedIn using li_at cookie.
-     
-     Args:
-         page: Playwright page object
-         cookie_value: Value of li_at cookie
-         
-     Raises:
-         AuthenticationError: If cookie login fails
-     """
-     logger.info("Logging in with cookie...")
-     
-     try:
-         # Set the cookie
-         await page.context.add_cookies([{
-             "name": "li_at",
-             "value": cookie_value,
-             "domain": ".linkedin.com",
-             "path": "/"
-         }])
-         
-         # Navigate to feed to verify
-         await page.goto('https://www.linkedin.com/feed/', wait_until='domcontentloaded')
-         
-         # Check if we're redirected to login (cookie invalid)
-         if 'login' in page.url or 'authwall' in page.url:
-             raise AuthenticationError(
-                 "Cookie authentication failed. The cookie may be expired or invalid."
-             )
-         
-         # Verify login by polling is_logged_in()
-         start_time = time.time()
-         logged_in = False
-         while (time.time() - start_time) * 1000 < 5000:
-             if await is_logged_in(page):
-                 logger.info("✓ Successfully authenticated with cookie")
-                 logged_in = True
-                 break
-             await asyncio.sleep(0.5)  # Poll every 500ms
-         
-         if not logged_in:
-             # Timeout: couldn't verify within 5s but may still be logged in
-             logger.warning(
-                 "Could not verify cookie login. "
-                 "Proceeding anyway..."
-             )
-     
-     except Exception as e:
-         if isinstance(e, AuthenticationError):
-             raise
-         raise AuthenticationError(f"Cookie authentication error: {e}")
+    logger.info("Logging in with cookie...")
+
+    try:
+        await page.context.add_cookies([{
+            "name": "li_at",
+            "value": cookie_value,
+            "domain": ".linkedin.com",
+            "path": "/"
+        }])
+
+        record_api_call("linkedin", kind="playwright")
+        await page.goto('https://www.linkedin.com/feed/', wait_until='domcontentloaded')
+
+        if 'login' in page.url or 'authwall' in page.url:
+            raise AuthenticationError(
+                "Cookie authentication failed. The cookie may be expired or invalid."
+            )
+
+        start_time = time.time()
+        logged_in = False
+        cookie_url = page.url
+        while (time.time() - start_time) * 1000 < 5000:
+            if await is_logged_in(page):
+                logger.info("LinkedIn cookie login successful (url=%s)", cookie_url)
+                logged_in = True
+                break
+            await asyncio.sleep(0.5)
+
+        if not logged_in:
+            if "feed" in cookie_url or "mynetwork" in cookie_url:
+                logger.info(
+                    "LinkedIn cookie login successful (url=%s, nav verification skipped)",
+                    cookie_url,
+                )
+            else:
+                logger.warning(
+                    "Could not verify LinkedIn cookie login (url=%s). Proceeding anyway...",
+                    cookie_url,
+                )
+
+    except Exception as e:
+        if isinstance(e, AuthenticationError):
+            raise
+        raise AuthenticationError(f"Cookie authentication error: {e}")
 
 
 async def is_logged_in(page: Page) -> bool:
-    """
-    Check if currently logged in to LinkedIn.
-    
-    Args:
-        page: Playwright page object
-        
-    Returns:
-        True if logged in, False otherwise
-    """
     try:
         current_url = page.url
-        
-        # Step 1: Fail-fast on auth blockers
         auth_blockers = ['/login', '/authwall', '/checkpoint', '/challenge', '/uas/login', '/uas/consumer-email-challenge']
         if any(pattern in current_url for pattern in auth_blockers):
             return False
-        
-        # Step 2: Selector check (PRIMARY) - check for nav elements
         old_selectors = '.global-nav__primary-link, [data-control-name="nav.settings"]'
         old_count = await page.locator(old_selectors).count()
-        
         new_selectors = 'nav a[href*="/feed"], nav button:has-text("Home"), nav a[href*="/mynetwork"]'
         new_count = await page.locator(new_selectors).count()
-        
         has_nav_elements = old_count > 0 or new_count > 0
-        
-        # Step 3: URL fallback - check for authenticated-only pages
         authenticated_only_pages = ['/feed', '/mynetwork', '/messaging', '/notifications']
         is_authenticated_page = any(pattern in current_url for pattern in authenticated_only_pages)
-        
-        # Return True if either nav elements found or on authenticated page
         return has_nav_elements or is_authenticated_page
     except Exception:
         return False
 
 
 async def wait_for_manual_login(page: Page, timeout: int = 300000) -> None:
-    """
-    Wait for user to manually complete login (useful for 2FA, CAPTCHA, etc.).
-    
-    Args:
-        page: Playwright page object
-        timeout: Timeout in milliseconds (default: 5 minutes)
-        
-    Raises:
-        AuthenticationError: If timeout or login not completed
-    """
+
     logger.info(
         "⏳ Please complete the login process manually in the browser. "
         "Waiting up to 5 minutes..."
@@ -298,12 +269,9 @@ async def wait_for_manual_login(page: Page, timeout: int = 300000) -> None:
     start_time = asyncio.get_event_loop().time()
     
     while True:
-        # Check if logged in
         if await is_logged_in(page):
-            logger.info("✓ Manual login completed successfully")
+            logger.info("LinkedIn manual login successful (url=%s)", page.url)
             return
-        
-        # Check timeout
         elapsed = (asyncio.get_event_loop().time() - start_time) * 1000
         if elapsed > timeout:
             raise AuthenticationError(

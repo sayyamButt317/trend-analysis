@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.services.competitor_discovery import discover_competitors
 from agents.trend.services.competitor_matcher import DEFAULT_COMPETITOR_TARGET
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 Competitor = dict[str, Any]
 Company = dict[str, Any]
 
-DISCOVERY_POOL_MULTIPLIER = 4
+DISCOVERY_POOL_MULTIPLIER = 2
 
 
 def _manual_competitor_inputs(config: dict, filters: dict) -> list[str]:
@@ -88,7 +89,12 @@ async def find_competitors(
         return [], {}, "Competitor discovery failed due to an internal error. Check server logs."
 
     if not candidates:
-        return [], filters_applied, f"No competitor accounts found for {company_name}."
+        city = filters.get("city") or config.get("city")
+        place = ", ".join(p for p in [city, region] if p) or "your region"
+        return [], filters_applied, (
+            f"No competitor accounts found for {company_name} in {place}. "
+            "Try adding services to company_data or broaden region."
+        )
 
     filters_applied["matching_mode"] = "smart_competitor_search"
     filters_applied["competitor_target"] = competitor_limit
@@ -97,18 +103,29 @@ async def find_competitors(
 
 async def FindCompetitorNode(state: CompetitorState) -> CompetitorState:
     """Legacy fallback when intelligence pipeline did not populate competitors."""
-    if state.get("error"):
-        return state
-
     existing = state.get("verified_competitors") or state.get("discovered_influencers") or []
     if existing:
-        logger.info("Skipping legacy FindCompetitor; %s verified competitor(s) already found", len(existing))
+        log_event("2_discovery", "Skipping Instagram fallback — competitors already verified", count=len(existing))
         return state
 
     config = state.get("config") or {}
     company = config.get("company") or {}
     filters = config.get("filters") or config
 
+    # Allow fallback even if intelligence pipeline logged a soft warning
+    prior_error = state.get("error") or ""
+    if prior_error and "No verified competitors" not in prior_error:
+        return state
+    if prior_error:
+        state.pop("error", None)
+
+    company_name = (company.get("name") or config.get("company_name") or "").strip()
+    log_event(
+        "2_discovery",
+        "Running Instagram fallback discovery",
+        company=company_name,
+        region=filters.get("region") or config.get("region"),
+    )
     candidates, filters_applied, error = await find_competitors(company, filters, config=config)
     if error:
         state["error"] = error
@@ -116,8 +133,13 @@ async def FindCompetitorNode(state: CompetitorState) -> CompetitorState:
         return state
 
     config["discovery_source"] = filters_applied.get("matching_mode") or "smart_competitor_search"
-    config["filters_applied"] = filters_applied
+    config["filters_applied"] = {
+        **(config.get("filters_applied") or {}),
+        **filters_applied,
+    }
     state["config"] = config
+    state["verified_competitors"] = candidates
     state["discovered_influencers"] = candidates
     state["competitors"] = candidates
+    log_event("2_discovery", "Instagram fallback complete", competitors=len(candidates))
     return state

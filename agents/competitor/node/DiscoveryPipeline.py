@@ -1,26 +1,40 @@
 import logging
 
+from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from models.company import CompanyProfile
 from models.search_intelligence import SearchIntelligence
 from service.Competitor.company_intelligence_builder import CompanyIntelligenceBuilder
 from service.Competitor.company_verifier import CompanyVerifier
+from service.Competitor.platforms import filter_competitor_socials
 
 logger = logging.getLogger(__name__)
 
 
 async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     """Run Tavily + Firecrawl + social discovery and verify candidates."""
-    if state.get("error"):
+    # User-profile warnings (e.g. LinkedIn checkpoint) must not block competitor discovery.
+    fatal = state.get("error") or ""
+    if fatal and "rate limit" in fatal.lower():
+        return state
+
+    existing = state.get("verified_competitors") or state.get("discovered_influencers") or []
+    if existing:
+        log_event(
+            "2_discovery",
+            "Skipping Tavily/Firecrawl discovery — competitors already proposed",
+            count=len(existing),
+            source=(state.get("config") or {}).get("discovery_source"),
+        )
         return state
 
     config = state.get("config") or {}
     filters = config.get("filters") or config
     region = filters.get("region") or config.get("region")
     runtime = config.get("runtime_profile") or {}
-    candidate_multiplier = int(runtime.get("discovery_candidate_multiplier") or 3)
+    candidate_multiplier = int(runtime.get("discovery_candidate_multiplier") or 2)
     competitor_limit = int(
-        filters.get("competitor_limit") or config.get("competitor_limit") or 50
+        filters.get("competitor_limit") or config.get("competitor_limit") or 10
     )
 
     profile_data = state.get("company_profile") or config.get("company") or {}
@@ -29,15 +43,34 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     search_intel = SearchIntelligence(**{**search_data, "company_name": company.name})
 
     builder = CompanyIntelligenceBuilder()
+    tavily_ok = builder.tavily.available
+    log_event(
+        "2_discovery",
+        "Discovering candidates via Tavily/Firecrawl",
+        company=company.name,
+        region=region,
+        tavily="configured" if tavily_ok else "missing",
+        firecrawl="configured" if builder.firecrawl.available else "missing",
+        limit=competitor_limit * candidate_multiplier,
+    )
     candidates = await builder.discover_candidates(
         company=company,
         search_intel=search_intel,
         region=region,
         limit=competitor_limit * candidate_multiplier,
-        max_tavily_queries=int(runtime.get("max_tavily_queries") or 20),
-        max_firecrawl_queries=int(runtime.get("max_firecrawl_queries") or 8),
+        max_tavily_queries=int(runtime.get("max_tavily_queries") or 10),
+        max_firecrawl_queries=int(runtime.get("max_firecrawl_queries") or 4),
+        max_social_tavily_lookups=int(runtime.get("max_social_tavily_lookups") or 15),
+        resolve_linkedin=not bool(config.get("skip_linkedin")),
     )
 
+    log_event(
+        "2_discovery",
+        "Verifying discovered candidates",
+        candidates=len(candidates),
+        region=region,
+        limit=competitor_limit,
+    )
     verifier = CompanyVerifier()
     verified = verifier.verify(
         company=company,
@@ -47,7 +80,7 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     )
 
     website_intel = state.get("web_crawl")
-    own_socials = (website_intel or {}).get("social_links") or {}
+    own_socials = filter_competitor_socials((website_intel or {}).get("social_links") or {})
     intelligence = builder.build_company_intelligence(
         company=company,
         website_intel=website_intel,
@@ -75,8 +108,25 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     state["config"] = config
 
     if not verified:
-        state["error"] = (
-            f"No verified competitors found for {company.name} in region '{region}'. "
-            "Check FIRECRAWL_API_KEY / TRAVILY_API_KEY or broaden region."
+        warnings = list((config.get("filters_applied") or {}).get("discovery_warnings") or [])
+        warnings.append(
+            f"Intelligence pipeline found {len(candidates)} candidate(s) but 0 passed verification "
+            f"for region '{region}'. Falling back to Instagram discovery."
+        )
+        config.setdefault("filters_applied", {})["discovery_warnings"] = warnings
+        state["config"] = config
+        log_event(
+            "2_discovery",
+            "No verified competitors — will use Instagram fallback",
+            company=company.name,
+            region=region,
+            candidates=len(candidates),
+        )
+    else:
+        log_event(
+            "2_discovery",
+            "Verified competitors ready",
+            verified=len(verified),
+            candidates=len(candidates),
         )
     return state

@@ -12,6 +12,7 @@ from scrapper.instagram_finder.constants import (
 )
 from scrapper.instagram_finder.country_detector import normalize_target_countries
 from scrapper.instagram_finder.extractor import extract_username
+from scrapper.tavily_retry import tavily_search_with_retry
 
 
 class InstagramSearch:
@@ -34,7 +35,8 @@ class InstagramSearch:
             return []
 
         try:
-            response = self.client.search(
+            response = tavily_search_with_retry(
+                self.client,
                 query=f'site:instagram.com "{query}"',
                 search_depth="basic",
                 topic="general",
@@ -43,6 +45,8 @@ class InstagramSearch:
                 include_raw_content=False,
                 include_images=False,
             )
+            if not response:
+                return []
         except Exception:
             return []
 

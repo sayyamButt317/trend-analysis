@@ -1,4 +1,5 @@
 from agents.trend.services.content_analyzer import build_market_content_usage
+from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 
 
@@ -14,6 +15,14 @@ async def GenerateCompetitorSummaryNode(state: CompetitorState) -> CompetitorSta
     competitors = state.get("discovered_influencers") or []
     content_mix = state.get("content_mix") or []
     post_count = len(state.get("processed_posts") or [])
+
+    log_event(
+        "4_strategy",
+        "Writing competitor summary",
+        company=company_name,
+        competitors=len(competitors),
+        posts=post_count,
+    )
 
     lines = [
         f"Competitor analysis for {company_name}.",
@@ -76,4 +85,5 @@ async def GenerateCompetitorSummaryNode(state: CompetitorState) -> CompetitorSta
         "gap_analysis": gaps,
         "recommendations": recs,
     }
+    log_event("4_strategy", "Summary ready", length=len(state["competitor_summary"]))
     return state

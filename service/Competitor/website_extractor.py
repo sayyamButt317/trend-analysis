@@ -1,6 +1,5 @@
 import logging
 import re
-
 from config.credential_config import config
 from models.website import WebsiteIntelligence
 from prompts.company_analysis import SYSTEM_PROMPT as WEBSITE_EXTRACT_PROMPT
@@ -11,9 +10,6 @@ logger = logging.getLogger(__name__)
 SOCIAL_PATTERNS = {
     "instagram": re.compile(r"instagram\.com/([A-Za-z0-9._]+)", re.I),
     "linkedin": re.compile(r"linkedin\.com/(company|in)/([A-Za-z0-9_-]+)", re.I),
-    "x": re.compile(r"(?:x|twitter)\.com/([A-Za-z0-9_]+)", re.I),
-    "reddit": re.compile(r"reddit\.com/(?:r|u)/([A-Za-z0-9_]+)", re.I),
-    "youtube": re.compile(r"youtube\.com/(?:@|channel/|c/)([A-Za-z0-9._-]+)", re.I),
 }
 
 
@@ -27,16 +23,8 @@ def _extract_social_links(text: str, links: list[str] | None = None) -> dict[str
         if match:
             if platform == "linkedin":
                 found[platform] = f"https://www.linkedin.com/{match.group(1)}/{match.group(2)}/"
-            else:
-                handle = match.group(1)
-                if platform == "instagram":
-                    found[platform] = f"https://www.instagram.com/{handle}/"
-                elif platform == "x":
-                    found[platform] = f"https://x.com/{handle}"
-                elif platform == "reddit":
-                    found[platform] = f"https://www.reddit.com/r/{handle}"
-                elif platform == "youtube":
-                    found[platform] = f"https://www.youtube.com/@{handle}"
+            elif platform == "instagram":
+                found[platform] = f"https://www.instagram.com/{match.group(1)}/"
     return found
 
 

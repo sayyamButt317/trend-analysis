@@ -1,5 +1,4 @@
-"""Browser lifecycle management for Playwright."""
-
+from core.api_call_counter import bind_stats_to_thread, get_api_call_stats
 import asyncio
 import json
 import logging
@@ -7,7 +6,6 @@ import sys
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page, Playwright
-
 from .exceptions import NetworkError
 
 logger = logging.getLogger(__name__)
@@ -16,7 +14,6 @@ T = TypeVar("T")
 
 
 def configure_windows_event_loop() -> None:
-    """Use ProactorEventLoop on Windows so asyncio subprocess works (Playwright)."""
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -39,29 +36,40 @@ def playwright_subprocess_supported() -> bool:
     return False
 
 
+async def _close_with_timeout(awaitable: Awaitable[Any], label: str, timeout: float = 5.0) -> None:
+    try:
+        await asyncio.wait_for(awaitable, timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.warning("Timed out closing %s", label)
+    except Exception as exc:
+        logger.debug("Error closing %s: %s", label, exc)
+
+
 async def run_async_playwright_in_thread(
     coro_factory: Callable[[], Awaitable[T]],
 ) -> T:
-    """
-    Run Playwright async work in a dedicated thread with a Proactor event loop.
-
-    Uvicorn/FastAPI on Windows often uses SelectorEventLoop, which raises
-    NotImplementedError for Playwright's subprocess launch.
-    """
+    parent_stats = get_api_call_stats()
 
     def _runner() -> T:
+        bind_stats_to_thread(parent_stats)
         configure_windows_event_loop()
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             return loop.run_until_complete(coro_factory())
+        except BaseException:
+            raise
         finally:
             try:
-                pending = asyncio.all_tasks(loop)
+                pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
                 for task in pending:
                     task.cancel()
                 if pending:
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
             except Exception:
                 pass
             loop.close()
@@ -146,27 +154,25 @@ class BrowserManager:
     
     async def close(self) -> None:
         """Close browser and cleanup resources."""
-        try:
-            if self._page:
-                await self._page.close()
-                self._page = None
-            
-            if self._context:
-                await self._context.close()
-                self._context = None
-            
-            if self._browser:
-                await self._browser.close()
-                self._browser = None
-            
-            if self._playwright:
-                await self._playwright.stop()
-                self._playwright = None
-            
-            logger.info("Browser closed")
-            
-        except Exception as e:
-            logger.error(f"Error closing browser: {e}")
+        page = self._page
+        context = self._context
+        browser = self._browser
+        playwright = self._playwright
+        self._page = None
+        self._context = None
+        self._browser = None
+        self._playwright = None
+
+        if page:
+            await _close_with_timeout(page.close(), "page")
+        if context:
+            await _close_with_timeout(context.close(), "context")
+        if browser:
+            await _close_with_timeout(browser.close(), "browser")
+        if playwright:
+            await _close_with_timeout(playwright.stop(), "playwright")
+
+        logger.info("Browser closed")
     
     async def new_page(self) -> Page:
         """

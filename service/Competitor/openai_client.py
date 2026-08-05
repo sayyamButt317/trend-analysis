@@ -2,9 +2,7 @@ import json
 import logging
 import re
 from typing import Any
-
 import httpx
-
 from config.credential_config import config
 
 logger = logging.getLogger(__name__)

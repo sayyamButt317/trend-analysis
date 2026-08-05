@@ -1,6 +1,5 @@
 import logging
 from typing import Any
-
 from models.company import CompanyProfile
 
 logger = logging.getLogger(__name__)
@@ -10,7 +9,23 @@ REGION_TERMS = {
     "mena": ("mena", "middle east", "gcc", "uae", "saudi", "egypt", "dubai"),
     "north america": ("usa", "us", "united states", "canada", "north america"),
     "europe": ("europe", "uk", "united kingdom", "germany", "france"),
+    "pakistan": ("pakistan", "pk", "lahore", "karachi", "islamabad", "rawalpindi", "faisalabad", "software house"),
+    "pk": ("pakistan", "pk", "lahore", "karachi", "islamabad", "rawalpindi"),
+    "south asia": ("south asia", "pakistan", "india", "bangladesh", "lahore", "karachi"),
+    "asia": ("asia", "south asia", "pakistan", "india", "singapore"),
 }
+
+
+def _region_terms(region: str | None, company: CompanyProfile) -> tuple[str, ...]:
+    key = (region or company.region or company.country or "").lower().strip()
+    if key in REGION_TERMS:
+        return REGION_TERMS[key]
+    for map_key, terms in REGION_TERMS.items():
+        if map_key in key or key in map_key:
+            return terms
+    if key:
+        return (key, key.replace(" ", ""))
+    return ("global",)
 
 
 def _overlap_score(a: list[str], b: list[str]) -> float:
@@ -53,13 +68,27 @@ class CompetitorRanker:
         if industry_score < 0.2 and company.industry and company.industry.lower() in text:
             industry_score = 0.6
 
-        product_score = _overlap_score(company.products, [text])
         service_score = _overlap_score(company.services, [text])
+        intel = candidate.get("website_intelligence") or {}
+        if intel.get("services"):
+            service_score = max(service_score, _overlap_score(company.services, intel["services"]))
+        product_score = _overlap_score(company.products, [text])
         audience_score = _overlap_score(company.target_audience, [text])
         tech_score = _overlap_score(company.technologies, [text])
+        if intel.get("technologies"):
+            tech_score = max(tech_score, _overlap_score(company.technologies, intel["technologies"]))
 
-        region_terms = REGION_TERMS.get((region or company.region or "").lower(), ((region or "").lower(),))
+        pricing_score = 0.5 if (company.pricing_model or "").lower() in text else 0.0
+        content_score = 0.4 if candidate.get("linkedin_analysis") or candidate.get("instagram_analysis") else 0.2
+        social_score = 0.5 if candidate.get("instagram_analysis") else 0.2
+
+        region_terms = _region_terms(region, company)
+        source_query = (candidate.get("source_query") or "").lower()
         geography_score = 1.0 if _text_hits(text, region_terms) else 0.2
+        if geography_score < 0.5 and region and (region or "").lower() in source_query:
+            geography_score = 0.85
+        if geography_score < 0.5 and _text_hits(source_query, region_terms):
+            geography_score = 0.8
         if company.country and company.country.lower() in text:
             geography_score = max(geography_score, 0.8)
         if company.city and company.city.lower() in text:
@@ -69,13 +98,16 @@ class CompetitorRanker:
         positioning_score = 0.6 if any(word in text for word in (company.keywords or [])[:8]) else 0.25
 
         overall = round(
-            industry_score * 0.22
-            + max(product_score, service_score) * 0.22
-            + audience_score * 0.1
-            + tech_score * 0.08
-            + geography_score * 0.18
-            + business_model_score * 0.08
-            + positioning_score * 0.12,
+            industry_score * 0.18
+            + max(product_score, service_score) * 0.18
+            + audience_score * 0.10
+            + tech_score * 0.10
+            + geography_score * 0.14
+            + business_model_score * 0.06
+            + positioning_score * 0.10
+            + pricing_score * 0.06
+            + content_score * 0.04
+            + social_score * 0.04,
             3,
         )
 
@@ -84,16 +116,21 @@ class CompetitorRanker:
             f"region {geography_score:.2f}, niche keywords {positioning_score:.2f}"
         )
         return {
+            "services": round(max(product_score, service_score), 3),
             "industry": round(industry_score, 3),
             "products": round(product_score, 3),
             "audience": round(audience_score, 3),
+            "target_audience": round(audience_score, 3),
             "business_model": round(business_model_score, 3),
             "positioning": round(positioning_score, 3),
-            "pricing": 0.0,
+            "marketing": round(max(positioning_score, social_score), 3),
+            "pricing": round(pricing_score, 3),
             "technology": round(tech_score, 3),
             "geography": round(geography_score, 3),
-            "social_strategy": 0.0,
-            "content_strategy": 0.0,
+            "location": round(geography_score, 3),
+            "social_strategy": round(social_score, 3),
+            "content_strategy": round(content_score, 3),
+            "content": round(content_score, 3),
             "overall": overall,
             "explanation": explanation,
         }

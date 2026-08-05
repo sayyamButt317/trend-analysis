@@ -1,5 +1,4 @@
 import logging
-
 from models.website import WebsiteIntelligence
 from service.Competitor.firecrawl_service import FirecrawlService
 from service.Competitor.website_extractor import WebsiteExtractor

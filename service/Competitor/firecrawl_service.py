@@ -1,7 +1,7 @@
 import logging
 from typing import Any
-
 from config.credential_config import config
+from core.api_call_counter import record_api_call
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class FirecrawlService:
             return {}
         try:
             client = self._get_client()
+            record_api_call("firecrawl", kind="scrape")
             result = client.scrape(url, formats=["markdown", "links"])
             if isinstance(result, dict):
                 data = result.get("data") or result
@@ -46,6 +47,7 @@ class FirecrawlService:
             return []
         try:
             client = self._get_client()
+            record_api_call("firecrawl", kind="search")
             response = client.search(query, limit=limit)
             if isinstance(response, dict):
                 return response.get("data") or response.get("results") or []

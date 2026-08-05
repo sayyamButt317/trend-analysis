@@ -53,7 +53,9 @@ class Config(BaseModel):
     )
     LOGO_DEV_PUBLIC_KEY: str = Field(default=os.getenv("LOGO_DEV_PUBLIC_KEY"))
     LOGO_DEV_SECRET_KEY: str = Field(default=os.getenv("LOGO_DEV_SECRET_KEY"))
-    TRAVILY_API_KEY: str = Field(default=os.getenv("TRAVILY_API_KEY"))
+    TRAVILY_API_KEY: str = Field(
+        default=os.getenv("TRAVILY_API_KEY") or os.getenv("TAVILY_API_KEY")
+    )
 
     SUPABASE_URL: str = Field(default=os.getenv("SUPABASE_URL"))
     SUPABASE_KEY: str = Field(default=os.getenv("SUPABASE_KEY"))

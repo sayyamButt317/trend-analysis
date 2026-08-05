@@ -1,6 +1,7 @@
 from collections import Counter
 from typing import Any
 from agents.trend.services.content_analyzer import build_market_content_usage
+from service.Competitor.competitor_analysis_sections import build_analysis_sections
 
 
 def _normalize_media_type(post: dict) -> str:
@@ -31,6 +32,45 @@ def _simplify_post(post: dict) -> dict:
     }
 
 
+def _simplify_company_social_analysis(analysis: dict[str, Any] | None) -> dict[str, Any]:
+    if not analysis:
+        return {}
+    handles = analysis.get("social_handles") or {}
+    instagram = analysis.get("instagram") or (analysis.get("user_instagram") or {}).get("instagram") or {}
+    user_ig = analysis.get("user_instagram") or {}
+    user_li = analysis.get("user_linkedin") or {}
+    company_dna = analysis.get("company_dna") or {}
+    return {
+        "company_dna": company_dna,
+        "user_instagram": {
+            "skipped": user_ig.get("skipped"),
+            "username": user_ig.get("username") or handles.get("instagram_username"),
+            "detected_niche": instagram.get("detected_niche") or analysis.get("detected_niche"),
+            "analysis": instagram,
+            "post_count": len(user_ig.get("posts") or analysis.get("instagram_posts") or []),
+            "warnings": user_ig.get("warnings") or [],
+        },
+        "user_linkedin": {
+            "skipped": user_li.get("skipped"),
+            "linkedin_url": user_li.get("linkedin_url") or analysis.get("linkedin_url"),
+            "analysis": user_li.get("linkedin_analysis") or analysis.get("linkedin_analysis"),
+            "content_themes": user_li.get("linkedin_content_themes") or analysis.get("linkedin_content_themes") or [],
+            "post_count": len(user_li.get("linkedin_posts") or analysis.get("linkedin_posts") or []),
+            "employees": user_li.get("employees") or analysis.get("employees") or [],
+            "employee_count": len(user_li.get("employees") or analysis.get("employees") or []),
+            "company_size": user_li.get("company_size") or analysis.get("company_size"),
+            "job_openings": user_li.get("job_openings") or analysis.get("job_openings") or [],
+            "job_count": len(user_li.get("job_openings") or analysis.get("job_openings") or []),
+            "is_hiring": user_li.get("is_hiring") or analysis.get("is_hiring"),
+            "hiring_signals": user_li.get("hiring_signals") or analysis.get("hiring_signals") or [],
+            "warnings": user_li.get("warnings") or [],
+        },
+        "social_handles": handles,
+        "detected_niche": analysis.get("detected_niche") or instagram.get("detected_niche"),
+        "audience_pain_points": (analysis.get("audience_pain_points") or analysis.get("pain_points") or [])[:8],
+    }
+
+
 def build_competitor_response(
     *,
     company: dict[str, Any],
@@ -46,9 +86,13 @@ def build_competitor_response(
     company_profile: dict[str, Any] | None = None,
     search_intelligence: dict[str, Any] | None = None,
     gap_analysis: dict[str, Any] | None = None,
+    competitor_intelligence_report: dict[str, Any] | None = None,
     recommendations: list[dict] | None = None,
     ai_report: dict[str, Any] | None = None,
     similarity_scores: list[dict] | None = None,
+    company_analysis: dict[str, Any] | None = None,
+    competitor_website_intel: list[dict] | None = None,
+    web_crawl: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     posts_by_username: dict[str, list[dict]] = {}
     for post in processed_posts:
@@ -170,6 +214,43 @@ def build_competitor_response(
     success = not error and post_count > 0
     content_usage = build_market_content_usage(content_mix, processed_posts)
 
+    market_insights = {
+        "topics": topics[:10],
+        "content_usage": content_usage,
+        "dominant_content_types": [
+            {"type": media_type, "count": count}
+            for media_type, count in all_media.most_common(5)
+        ],
+        "dominant_content_categories": [
+            {"category": category, "count": count}
+            for category, count in all_categories.most_common(5)
+        ],
+        "dominant_themes": [
+            {"theme": theme, "count": count}
+            for theme, count in all_themes.most_common(5)
+        ],
+        "top_hashtags": [
+            {"tag": tag, "count": count} for tag, count in all_hashtags.most_common(10)
+        ],
+        "hashtag_summary": hashtags[:10],
+    }
+
+    analysis = build_analysis_sections(
+        company=company,
+        company_profile=company_profile,
+        company_analysis=company_analysis,
+        competitor_intelligence_report=competitor_intelligence_report,
+        gap_analysis=gap_analysis,
+        search_intelligence=search_intelligence,
+        web_crawl=web_crawl,
+        similarity_scores=similarity_scores,
+        recommendations=recommendations,
+        competitor_website_intel=competitor_website_intel,
+        content_mix=content_mix,
+        market_insights=market_insights,
+        competitors=competitor_profiles,
+    )
+
     return {
         "success": success,
         "error": error,
@@ -177,11 +258,14 @@ def build_competitor_response(
         "company": {
             "name": company.get("name"),
             "instagram_username": company.get("instagram_username"),
+            "instagram_url": company.get("instagram_url"),
+            "linkedin_url": company.get("linkedin_url"),
             "website": company.get("website"),
             "services": company.get("services") or [],
             "flagship_services": company.get("flagship_services") or [],
             "extracted_signals": company.get("company_signals") or filters.get("company_signals") or {},
         },
+        "company_social_analysis": _simplify_company_social_analysis(company_analysis),
         "filters_applied": filters,
         "matching_mode": filters.get("matching_mode") or "smart",
         "discovery_warnings": filters.get("discovery_warnings") or [],
@@ -189,31 +273,17 @@ def build_competitor_response(
         "competitor_count": len(competitors),
         "post_count": post_count,
         "competitors": competitor_profiles,
-        "market_insights": {
-            "topics": topics[:10],
-            "content_usage": content_usage,
-            "dominant_content_types": [
-                {"type": media_type, "count": count}
-                for media_type, count in all_media.most_common(5)
-            ],
-            "dominant_content_categories": [
-                {"category": category, "count": count}
-                for category, count in all_categories.most_common(5)
-            ],
-            "dominant_themes": [
-                {"theme": theme, "count": count}
-                for theme, count in all_themes.most_common(5)
-            ],
-            "top_hashtags": [
-                {"tag": tag, "count": count} for tag, count in all_hashtags.most_common(10)
-            ],
-            "hashtag_summary": hashtags[:10],
-        },
+        "analysis": analysis,
+        "market_insights": market_insights,
         "meta": meta,
         "company_profile": company_profile or {},
         "search_intelligence": search_intelligence or {},
         "gap_analysis": gap_analysis or {},
+        "company_analysis": company_analysis,
+        "competitor_intelligence_report": competitor_intelligence_report,
         "recommendations": recommendations or [],
         "ai_report": ai_report or {},
         "similarity_scores": similarity_scores or [],
+        "competitor_website_intel": competitor_website_intel or [],
+        "web_crawl": web_crawl or {},
     }

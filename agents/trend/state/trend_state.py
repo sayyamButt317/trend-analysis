@@ -44,5 +44,7 @@ class TrendState(TypedDict, total=False):
     verified_competitors: list[dict[str, Any]]
     similarity_scores: list[dict[str, Any]]
     gap_analysis: dict[str, Any]
+    competitor_intelligence_report: dict[str, Any]
     recommendations: list[dict[str, Any]]
+    competitor_website_intel: list[dict[str, Any]]
     ai_report: dict[str, Any]

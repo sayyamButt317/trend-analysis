@@ -3,9 +3,7 @@ import uuid
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Any
-
 from fastapi import HTTPException
-
 from config.credential_config import config, resolve_supabase_api_key
 from db.connection import get_supabase
 from db.report_storage import fetch_stored_reports, save_competitor_report as persist_report

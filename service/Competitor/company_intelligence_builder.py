@@ -1,13 +1,14 @@
 import logging
+import re
 from typing import Any
 from urllib.parse import urlparse
-
 from models.competitor import CompetitorCandidate, SocialProfiles
 from models.company import CompanyProfile
 from models.company_intelligence import CompanyIntelligence, SearchInformation, SocialProfile, WebsiteInformation
 from models.search import DiscoveryCandidate
 from models.search_intelligence import SearchIntelligence
 from service.Competitor.firecrawl_service import FirecrawlService
+from service.Competitor.platforms import filter_competitor_socials
 from service.Competitor.social_resolver import SocialResolverService
 from service.Competitor.tavily_discovery import TavilyDiscoveryService
 
@@ -33,12 +34,14 @@ class CompanyIntelligenceBuilder:
         company: CompanyProfile,
         search_intel: SearchIntelligence,
         region: str | None = None,
-        limit: int = 50,
-        max_tavily_queries: int = 20,
-        max_firecrawl_queries: int = 8,
+        limit: int = 10,
+        max_tavily_queries: int = 10,
+        max_firecrawl_queries: int = 4,
+        max_social_tavily_lookups: int = 15,
+        resolve_linkedin: bool = False,
     ) -> list[dict[str, Any]]:
         queries = list(dict.fromkeys(search_intel.search_queries))[:max_tavily_queries]
-        tavily_candidates = await self.tavily.discover(queries)
+        tavily_candidates = await self.tavily.discover(queries, max_queries=max_tavily_queries)
 
         firecrawl_candidates: list[DiscoveryCandidate] = []
         if self.firecrawl.available:
@@ -63,7 +66,13 @@ class CompanyIntelligenceBuilder:
 
         for pool in (tavily_candidates, firecrawl_candidates):
             for item in pool:
-                key = _domain(item.website) or item.company_name.lower()
+                website = item.website or ""
+                ig = (getattr(item, "social_links", None) or {}).get("instagram", "")
+                if ig and "instagram.com" in ig:
+                    match = re.search(r"instagram\.com/([A-Za-z0-9._]+)", ig, re.I)
+                    key = f"ig:{match.group(1).lower()}" if match else _domain(website)
+                else:
+                    key = _domain(website) or item.company_name.lower()
                 if not key or (own_domain and own_domain in key):
                     continue
                 if key in merged:
@@ -79,7 +88,9 @@ class CompanyIntelligenceBuilder:
                     "source": "tavily" if pool is tavily_candidates else "firecrawl",
                     "source_query": item.source_query,
                     "confidence": float(item.tavily_score or 0.4),
-                    "social_links": {},
+                    "social_links": filter_competitor_socials(
+                        dict(getattr(item, "social_links", None) or {})
+                    ),
                 }
 
         for hint in company.competitors_hint:
@@ -96,7 +107,13 @@ class CompanyIntelligenceBuilder:
 
         candidates = list(merged.values())
         candidates.sort(key=lambda item: float(item.get("confidence") or 0), reverse=True)
-        resolved = await self.social.resolve_batch(candidates[: limit * 2], region=region)
+        social_cap = min(max_social_tavily_lookups, len(candidates), max(limit, 15))
+        resolved = await self.social.resolve_batch(
+            candidates[:social_cap],
+            region=region,
+            resolve_linkedin=resolve_linkedin,
+            stop_when_instagram_count=limit,
+        )
         return resolved[:limit]
 
     def build_company_intelligence(
@@ -122,11 +139,10 @@ class CompanyIntelligenceBuilder:
             )
 
         social_profiles = []
-        for platform, handle in (socials or {}).items():
-            if handle:
-                social_profiles.append(
-                    SocialProfile(platform=platform, username=str(handle), url=str(handle))
-                )
+        for platform, handle in filter_competitor_socials(socials or {}).items():
+            social_profiles.append(
+                SocialProfile(platform=platform, username=str(handle), url=str(handle))
+            )
 
         return CompanyIntelligence(
             name=company.name,
@@ -153,7 +169,7 @@ class CompanyIntelligenceBuilder:
     ) -> list[CompetitorCandidate]:
         results: list[CompetitorCandidate] = []
         for item in discovered:
-            socials = item.get("socials") or {}
+            socials = filter_competitor_socials(item.get("socials") or {})
             results.append(
                 CompetitorCandidate(
                     name=item.get("name") or "Unknown",
@@ -163,9 +179,6 @@ class CompanyIntelligenceBuilder:
                     socials=SocialProfiles(
                         instagram=socials.get("instagram"),
                         linkedin=socials.get("linkedin"),
-                        reddit=socials.get("reddit"),
-                        x=socials.get("x"),
-                        youtube=socials.get("youtube"),
                     ),
                     source=item.get("source") or "discovery",
                     confidence=float(item.get("confidence") or 0),

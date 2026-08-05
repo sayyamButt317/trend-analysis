@@ -1,5 +1,4 @@
 import logging
-
 from config.credential_config import config
 from models.company import CompanyProfile
 from models.search_intelligence import SearchIntelligence
@@ -72,6 +71,9 @@ audience_terms, alternative_names, competitor_patterns, excluded_terms, confiden
             [
                 f"companies similar to {company.name} {region}",
                 f"{company.industry or 'IT services'} competitors {region}",
+                f"software development companies {region}",
+                f"software house {region}",
+                f"IT services companies {region} instagram",
             ]
         )
         keywords = list(

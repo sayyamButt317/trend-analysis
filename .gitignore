@@ -90,3 +90,6 @@ Desktop.ini
 
 # Generated outputs (keep example payloads)
 examples/result.json
+
+# LinkedIn session cache (contains auth cookies — never commit)
+.cache/
