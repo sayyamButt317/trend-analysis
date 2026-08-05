@@ -8,6 +8,7 @@ from typing import Any
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.services.company_social_analyzer import resolve_company_social_handles
+from agents.competitor.node.discovery_utils import has_manual_competitors, manual_competitor_inputs
 from agents.trend.services.manual_competitors import resolve_manual_competitors
 from service.Competitor.competitor_proposer import MIN_COMPETITORS, CompetitorProposerService
 
@@ -15,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def _manual_inputs(config: dict[str, Any], filters: dict[str, Any]) -> list[str]:
-    return list(filters.get("competitors") or config.get("competitors") or [])
+    # Prefer nested filters, then top-level (to_agent_config spreads filters).
+    return manual_competitor_inputs({**config, "filters": filters})
 
 
 async def _fill_missing_socials(

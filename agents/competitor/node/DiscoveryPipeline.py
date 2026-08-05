@@ -1,5 +1,6 @@
 import logging
 
+from agents.competitor.node.discovery_utils import has_manual_competitors, manual_competitor_inputs
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from models.company import CompanyProfile
@@ -16,17 +17,24 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     if fatal and "rate limit" in fatal.lower():
         return state
 
+    config = state.get("config") or {}
+    if has_manual_competitors(config) or str(config.get("discovery_source") or "").lower() == "manual":
+        log_event(
+            "2_discovery",
+            "Skipping Tavily/Firecrawl discovery — user-provided competitors",
+            count=len(manual_competitor_inputs(config)),
+        )
+        return state
+
     existing = state.get("verified_competitors") or state.get("discovered_influencers") or []
     if existing:
         log_event(
             "2_discovery",
             "Skipping Tavily/Firecrawl discovery — competitors already proposed",
             count=len(existing),
-            source=(state.get("config") or {}).get("discovery_source"),
+            source=config.get("discovery_source"),
         )
         return state
-
-    config = state.get("config") or {}
     filters = config.get("filters") or config
     region = filters.get("region") or config.get("region")
     runtime = config.get("runtime_profile") or {}

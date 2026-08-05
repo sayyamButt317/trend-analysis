@@ -61,6 +61,7 @@ async def competitorAnalysisAgent(
         competitor_limit=agent_config.get("competitor_limit"),
         post_limit=agent_config.get("post_limit"),
         skip_linkedin=bool(agent_config.get("skip_linkedin")),
+        manual_competitors=len(filters_applied.get("competitors") or agent_config.get("competitors") or []),
     )
 
     initial_state: TrendState = {

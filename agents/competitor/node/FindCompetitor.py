@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 
+from agents.competitor.node.discovery_utils import manual_competitor_inputs
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.services.competitor_discovery import discover_competitors
@@ -15,10 +16,6 @@ Company = dict[str, Any]
 DISCOVERY_POOL_MULTIPLIER = 2
 
 
-def _manual_competitor_inputs(config: dict, filters: dict) -> list[str]:
-    return filters.get("competitors") or config.get("competitors") or []
-
-
 async def find_competitors(
     company: Company,
     filters: dict[str, Any],
@@ -27,7 +24,7 @@ async def find_competitors(
 ) -> tuple[list[Competitor], dict[str, Any], str | None]:
     config = config or {}
     company_name = (company.get("name") or config.get("company_name") or "").strip()
-    manual_inputs = _manual_competitor_inputs(config, filters)
+    manual_inputs = manual_competitor_inputs({**config, "filters": filters})
     manual_mode = bool(manual_inputs)
     competitor_limit = int(
         filters.get("competitor_limit") or config.get("competitor_limit") or DEFAULT_COMPETITOR_TARGET
@@ -50,6 +47,7 @@ async def find_competitors(
             "competitors": manual_inputs,
             "competitor_limit": competitor_limit,
             "matching_mode": "manual",
+            "discovery_source": "manual",
             "discovery_warnings": resolve_warnings,
         }
         if not candidates:
@@ -103,17 +101,51 @@ async def find_competitors(
 
 
 async def FindCompetitorNode(state: CompetitorState) -> CompetitorState:
-    """Legacy fallback when intelligence pipeline did not populate competitors."""
+    """Resolve manual competitors, or Instagram fallback when auto-discovery is empty."""
+    config = state.get("config") or {}
+    company = config.get("company") or {}
+    filters = config.get("filters") or config
+    manual_inputs = manual_competitor_inputs(config)
+
+    # User-provided list ALWAYS wins — overwrite any Tavily/listicle junk.
+    if manual_inputs:
+        log_event(
+            "2_discovery",
+            "Resolving user-provided competitors (override auto-discovery)",
+            count=len(manual_inputs),
+        )
+        prior_error = state.get("error") or ""
+        if prior_error:
+            state.pop("error", None)
+
+        candidates, filters_applied, error = await find_competitors(company, filters, config=config)
+        if error:
+            state["error"] = error
+            state["discovered_influencers"] = []
+            state["verified_competitors"] = []
+            state["competitors"] = []
+            return state
+
+        config["discovery_source"] = "manual"
+        config["filters_applied"] = {
+            **(config.get("filters_applied") or {}),
+            **filters_applied,
+            "matching_mode": "manual",
+            "discovery_source": "manual",
+        }
+        state["config"] = config
+        state["verified_competitors"] = candidates
+        state["discovered_influencers"] = candidates
+        state["competitors"] = candidates
+        state.pop("error", None)
+        log_event("2_discovery", "Manual competitors locked in", competitors=len(candidates))
+        return state
+
     existing = state.get("verified_competitors") or state.get("discovered_influencers") or []
     if existing:
         log_event("2_discovery", "Skipping Instagram fallback — competitors already verified", count=len(existing))
         return state
 
-    config = state.get("config") or {}
-    company = config.get("company") or {}
-    filters = config.get("filters") or config
-
-    # Allow fallback even if intelligence pipeline logged a soft warning
     prior_error = state.get("error") or ""
     if prior_error and "No verified competitors" not in prior_error:
         return state
