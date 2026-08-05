@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 from agents.competitor.invoke.competitor_invoke import competitorAnalysisAgent
+from agents.competitor.jobs import create_competitor_job, get_competitor_job
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
 from service.Competitor.analysis_details import (
     create_competitor_report,
@@ -19,16 +20,64 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
 
 @router.post(
     "/analyze",
-    summary="Analyze competitors from company details + region",
+    summary="Analyze competitors (sync — may 504 behind proxies)",
     description=(
-        "Send company details + region. Optionally pass `company_name`, `instagram_username`, "
-        "and/or `linkedin_url`. LinkedIn posts are fetched from "
-        "`/company/{slug}/posts/?feedView=all` built from your company name. "
-        "You may also pass competitor names or @handles to skip auto-discovery."
+        "Runs the full competitor agent and waits for completion. "
+        "Long runs (3–10+ minutes) often hit gateway 504 timeouts. "
+        "Prefer POST /competitor-analysis/analyze/async from the frontend."
     ),
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):
     return await competitorAnalysisAgent(request)
+
+
+@router.post(
+    "/analyze/async",
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Start competitor analysis in the background (recommended for frontend)",
+    description=(
+        "Starts the full competitor agent without waiting. Returns a job_id immediately "
+        "so proxies do not 504. Poll GET /competitor-analysis/jobs/{job_id} until "
+        "status is completed, then use the embedded result (same shape as sync analyze)."
+    ),
+)
+async def competitorAnalysisAsync(request: CompetitorAnalysisRequest):
+    return await create_competitor_job(request)
+
+
+@router.get(
+    "/jobs/{job_id}",
+    summary="Poll async competitor analysis job status",
+    description=(
+        "Returns job status: queued | running | completed | failed. "
+        "When completed, includes the full agent result JSON and analysis_id."
+    ),
+)
+async def getCompetitorJobStatus(job_id: str):
+    job = await get_competitor_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
+
+    payload = {
+        "success": True,
+        "job_id": job["job_id"],
+        "status": job["status"],
+        "created_at": job.get("created_at"),
+        "updated_at": job.get("updated_at"),
+        "company_name": job.get("company_name"),
+        "region": job.get("region"),
+        "competitor_limit": job.get("competitor_limit"),
+        "elapsed_sec": job.get("elapsed_sec"),
+        "analysis_id": job.get("analysis_id"),
+        "prompt_id": job.get("prompt_id"),
+        "error": job.get("error"),
+        "poll_url": f"/competitor-analysis/jobs/{job_id}",
+    }
+    if job.get("status") == "completed" and job.get("result") is not None:
+        payload["result"] = job["result"]
+        if job.get("analysis_id"):
+            payload["result_url"] = f"/competitor-analysis/results/{job['analysis_id']}"
+    return payload
 
 
 @router.get(
