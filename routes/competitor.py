@@ -5,7 +5,9 @@ from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
 from service.Competitor.analysis_details import (
     create_competitor_report,
     get_competitor_analytics,
+    get_stored_analysis_result,
     get_stored_report,
+    list_stored_analysis_results,
     list_stored_competitors,
     list_stored_content,
     list_stored_hashtags,
@@ -27,6 +29,47 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):
     return await competitorAnalysisAgent(request)
+
+
+@router.get(
+    "/results/all",
+    summary="List all full saved competitor-agent responses",
+    description=(
+        "Returns every stored competitor analysis payload (same JSON shape as POST /analyze). "
+        "Use limit/offset for pagination."
+    ),
+)
+async def listStoredAnalysisResults(
+    limit: int = Query(default=20, ge=1, le=100, description="Max runs to return"),
+    offset: int = Query(default=0, ge=0, description="Number of runs to skip"),
+):
+    return await list_stored_analysis_results(limit=limit, offset=offset)
+
+
+@router.get(
+    "/results",
+    summary="Get the full saved competitor-agent response",
+    description=(
+        "Returns the exact JSON payload saved from POST /analyze (same shape as the live agent response). "
+        "Pass analysis_id for a specific run; omit it to get the latest."
+    ),
+)
+async def getStoredAnalysisResult(
+    analysis_id: str | None = Query(
+        default=None,
+        description="Analysis UUID from meta.analysis_id. If omitted, returns the most recent run.",
+    ),
+):
+    return await get_stored_analysis_result(analysis_id)
+
+
+@router.get(
+    "/results/{analysis_id}",
+    summary="Get a full saved competitor-agent response by ID",
+    description="Returns the exact JSON payload saved from POST /analyze for this analysis_id.",
+)
+async def getStoredAnalysisResultById(analysis_id: str):
+    return await get_stored_analysis_result(analysis_id)
 
 
 @router.get(

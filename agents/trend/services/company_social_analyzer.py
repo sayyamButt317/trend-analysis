@@ -234,7 +234,7 @@ async def _llm_audience_pain_points(
     niche: str | None = None,
 ) -> dict[str, Any]:
     api_key = (config.OPENAI_API_KEY or "").strip()
-    model = (config.OPENAI_MODEL_NAME or "gpt-4o-mini").strip()
+    model = (config.OPENAI_MODEL_NAME or "gpt-4o").strip()
     if not api_key:
         return {"pain_points": [], "audience_needs": [], "content_themes": []}
 
@@ -337,7 +337,7 @@ async def _llm_pain_points(
     company_signals: dict[str, Any],
 ) -> dict[str, Any]:
     api_key = (config.OPENAI_API_KEY or "").strip()
-    model = (config.OPENAI_MODEL_NAME or "gpt-4o-mini").strip()
+    model = (config.OPENAI_MODEL_NAME or "gpt-4o").strip()
     if not api_key or not linkedin_posts:
         return []
 

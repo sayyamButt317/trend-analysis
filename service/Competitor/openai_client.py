@@ -7,8 +7,8 @@ from config.credential_config import config
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gpt-4o-mini"
-FALLBACK_MODELS = ("gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo")
+DEFAULT_MODEL = "gpt-4o"
+FALLBACK_MODELS = ("gpt-4o", "gpt-4o-mini", "gpt-3.5-turbo")
 
 _INVALID_MODELS = frozenset(
     {

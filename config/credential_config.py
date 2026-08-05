@@ -8,8 +8,8 @@ load_dotenv()
 class Config(BaseModel):
     OPENAI_API_KEY: str = Field(default=os.getenv("OPENAI_API_KEY"))
     OPENAI_MODEL_NAME: str = Field(
-        default=os.getenv("OPENAI_MODEL_NAME") or "gpt-4o-mini",
-        description="Use gpt-4o-mini or gpt-4o. Invalid values like gpt-5.5 are auto-corrected.",
+        default=os.getenv("OPENAI_MODEL_NAME") or "gpt-4o",
+        description="Use gpt-4o or gpt-4o-mini. Invalid values like gpt-5.5 fall back to gpt-4o.",
     )
 
     INSTAGRAM_APP_ID: str = Field(default=os.getenv("INSTAGRAM_APP_ID"))

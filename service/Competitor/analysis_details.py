@@ -565,3 +565,60 @@ async def get_competitor_analytics(analysis_id: str | None = None) -> dict[str, 
         "success": True,
         **_build_analytics_payload(target, prompt, recent_analyses=recent),
     }
+
+
+async def get_stored_analysis_result(analysis_id: str | None = None) -> dict[str, Any]:
+    """Return the exact competitor-agent response JSON saved in the analysis table."""
+    _ensure_storage_configured()
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    if not analyses:
+        raise HTTPException(
+            status_code=404,
+            detail="No analysis data found. Run POST /competitor-analysis/analyze first.",
+        )
+    return _row_to_agent_result(analyses[0])
+
+
+async def list_stored_analysis_results(
+    *,
+    limit: int = 20,
+    offset: int = 0,
+) -> dict[str, Any]:
+    """Return full saved agent payloads for recent competitor analysis runs."""
+    _ensure_storage_configured()
+    limit = max(1, min(int(limit or 20), 100))
+    offset = max(0, int(offset or 0))
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, None)
+    page = analyses[offset : offset + limit]
+    results = [_row_to_agent_result(row) for row in page]
+    return {
+        "success": True,
+        "count": len(results),
+        "total": len(analyses),
+        "limit": limit,
+        "offset": offset,
+        "results": results,
+    }
+
+
+def _row_to_agent_result(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("result")
+    if isinstance(raw, str):
+        import json
+
+        try:
+            result = json.loads(raw)
+        except json.JSONDecodeError:
+            result = {"raw_result": raw}
+    elif isinstance(raw, dict):
+        result = dict(raw)
+    else:
+        result = {}
+
+    result.setdefault("meta", {})
+    if isinstance(result["meta"], dict):
+        result["meta"]["analysis_id"] = str(row.get("id"))
+        result["meta"]["prompt_id"] = str(row.get("prompt_id")) if row.get("prompt_id") else None
+        result["meta"]["created_at"] = row.get("created_at")
+        result["meta"]["success"] = row.get("success")
+    return result

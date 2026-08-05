@@ -63,9 +63,7 @@ async def find_competitors(
     pool_multiplier = int(
         (config.get("runtime_profile") or {}).get("discovery_candidate_multiplier") or DISCOVERY_POOL_MULTIPLIER
     )
-    pool_size = competitor_limit * pool_multiplier
-    if not (config.get("runtime_profile") or {}).get("serverless"):
-        pool_size = max(pool_size, 120)
+    pool_size = max(competitor_limit * pool_multiplier, 120)
     try:
         candidates, filters_applied = await discover_competitors(
             company_name=company_name,

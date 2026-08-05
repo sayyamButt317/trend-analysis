@@ -114,13 +114,13 @@ class CompetitorAnalysisRequest(BaseModel):
         default=None,
         ge=1,
         le=50,
-        description="Max competitors to analyze (from request; default 10 locally, 5 on Vercel).",
+        description="Max competitors to analyze (from request; default 10).",
     )
     post_limit: Optional[int] = Field(
         default=None,
         ge=1,
         le=25,
-        description="Instagram posts per account (default 10 locally, 5 on Vercel).",
+        description="Instagram posts per account (default 10).",
     )
 
     @field_validator("company_data", "region")

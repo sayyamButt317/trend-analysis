@@ -18,8 +18,6 @@ async def analyze_competitor_website_node(state: CompetitorState) -> CompetitorS
     config = state.get("config") or {}
     runtime = config.get("runtime_profile") or {}
     max_crawls = int(runtime.get("max_competitor_website_crawls") or MAX_WEBSITE_CRAWLS)
-    if runtime.get("serverless"):
-        max_crawls = min(max_crawls, 3)
 
     competitors = list(
         state.get("discovered_influencers") or state.get("competitors") or []

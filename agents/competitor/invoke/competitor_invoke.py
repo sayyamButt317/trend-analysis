@@ -170,9 +170,8 @@ async def competitorAnalysisAgent(
                     "serverless": bool(profile.get("serverless")),
                 },
                 error=(
-                    f"Analysis exceeded the {max_duration}s serverless time limit. "
-                    f"Retry with fewer competitors (current limit: {limit}). "
-                    "On Vercel, use competitor_limit=3 in the request body."
+                    f"Analysis exceeded the {max_duration}s time limit. "
+                    f"Retry with fewer competitors (current limit: {limit})."
                 ),
             )
         except Exception as exc:
