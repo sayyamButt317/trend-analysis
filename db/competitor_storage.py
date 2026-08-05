@@ -108,3 +108,107 @@ async def save_competitor_run(
             "analysis_id": None,
             "storage_error": str(exc),
         }
+
+
+def _reports_table() -> str:
+    return (config.SUPABASE_TABLE_REPORTS or "reports").strip()
+
+
+def _delete_analysis_sync(analysis_id: str) -> dict[str, Any]:
+    """Delete analysis row, related reports, and orphaned prompt."""
+    client = get_supabase()
+    analysis_table = _analysis_table()
+    prompts_table = _prompts_table()
+    reports_table = _reports_table()
+
+    existing = (
+        client.table(analysis_table)
+        .select("id,prompt_id,agent_type")
+        .eq("id", analysis_id)
+        .eq("agent_type", AGENT_TYPE)
+        .limit(1)
+        .execute()
+    )
+    rows = existing.data or []
+    if not rows:
+        raise LookupError(f"Analysis not found: {analysis_id}")
+
+    prompt_id = rows[0].get("prompt_id")
+    deleted_reports = 0
+    deleted_prompt = False
+
+    try:
+        reports_resp = (
+            client.table(reports_table)
+            .delete()
+            .eq("analysis_id", analysis_id)
+            .execute()
+        )
+        deleted_reports = len(reports_resp.data or [])
+    except Exception:
+        logger.warning(
+            "Failed deleting reports for analysis_id=%s (table may not exist)",
+            analysis_id,
+            exc_info=True,
+        )
+
+    analysis_resp = (
+        client.table(analysis_table)
+        .delete()
+        .eq("id", analysis_id)
+        .eq("agent_type", AGENT_TYPE)
+        .execute()
+    )
+    if not (analysis_resp.data or []):
+        # Some Supabase configs return empty data on delete; verify gone.
+        check = (
+            client.table(analysis_table)
+            .select("id")
+            .eq("id", analysis_id)
+            .limit(1)
+            .execute()
+        )
+        if check.data:
+            raise RuntimeError(f"Failed to delete analysis row: {analysis_id}")
+
+    if prompt_id:
+        remaining = (
+            client.table(analysis_table)
+            .select("id")
+            .eq("prompt_id", prompt_id)
+            .limit(1)
+            .execute()
+        )
+        if not (remaining.data or []):
+            try:
+                client.table(prompts_table).delete().eq("id", prompt_id).execute()
+                deleted_prompt = True
+            except Exception:
+                logger.warning(
+                    "Failed deleting orphaned prompt_id=%s",
+                    prompt_id,
+                    exc_info=True,
+                )
+
+    return {
+        "analysis_id": analysis_id,
+        "prompt_id": prompt_id,
+        "deleted_reports": deleted_reports,
+        "deleted_prompt": deleted_prompt,
+    }
+
+
+async def delete_competitor_analysis(analysis_id: str) -> dict[str, Any]:
+    """Delete a stored competitor analysis result and related DB rows."""
+    if not _is_storage_configured():
+        raise RuntimeError("Supabase is not configured")
+
+    result = await asyncio.to_thread(_delete_analysis_sync, analysis_id)
+    logger.info(
+        "Deleted competitor analysis analysis_id=%s prompt_id=%s reports=%s prompt_deleted=%s",
+        result.get("analysis_id"),
+        result.get("prompt_id"),
+        result.get("deleted_reports"),
+        result.get("deleted_prompt"),
+    )
+    return result

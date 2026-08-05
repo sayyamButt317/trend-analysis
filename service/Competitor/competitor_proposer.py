@@ -9,6 +9,7 @@ from typing import Any
 from config.credential_config import config
 from prompts.competitor_proposal import SYSTEM_PROMPT
 from service.Competitor.openai_client import chat_completion_json, resolve_openai_model
+from service.Competitor.competitor_name_filters import is_junk_competitor
 from service.Competitor.platforms import filter_competitor_socials
 
 logger = logging.getLogger(__name__)
@@ -124,24 +125,9 @@ def _build_user_dna_blob(
 
 
 def _is_blocked_name(name: str) -> bool:
-    lowered = (name or "").lower()
-    blocked = (
-        "top ai",
-        "top artificial",
-        "best ai",
-        "best artificial",
-        "companies in",
-        "dominating",
-        "revealed",
-        "list of",
-        "ranking",
-        "peoplepakistan",
-        "zameen",
-        "olx",
-        "daraz",
-        "foodpanda",
-    )
-    return any(token in lowered for token in blocked)
+    from service.Competitor.competitor_name_filters import is_blocked_competitor_name
+
+    return is_blocked_competitor_name(name)
 
 
 def normalize_proposed_competitors(
@@ -159,7 +145,7 @@ def normalize_proposed_competitors(
         if not isinstance(item, dict):
             continue
         name = str(item.get("name") or "").strip()
-        if len(name) < 2 or _is_blocked_name(name):
+        if len(name) < 2:
             continue
         name_key = name.lower()
         if name_key in exclude_names or name_key in seen_names:
@@ -173,6 +159,15 @@ def normalize_proposed_competitors(
         website = (item.get("website") or "").strip() or None
         if website and not website.startswith("http"):
             website = f"https://{website}"
+
+        candidate = {
+            "name": name,
+            "website": website,
+            "linkedin_url": linkedin,
+            "socials": {"instagram": ig, "linkedin": linkedin},
+        }
+        if is_junk_competitor(candidate):
+            continue
 
         socials = filter_competitor_socials(
             {
@@ -242,13 +237,14 @@ class CompetitorProposerService:
 Region focus: {region}
 Requested authentic competitors: {target} (return at least {target})
 
+Infer industry / niche ONLY from this DNA (do not assume IT/software unless DNA says so).
+Propose real peers that sell overlapping offers to similar buyers in/around {region}.
+
 User company DNA (from profile + Instagram + LinkedIn analysis):
 {dna}
 
-Optional known competitor hints (validate; discard if not real peers):
+Optional known competitor hints (validate; discard if not real peers for THIS niche):
 {hints or []}
-
-Propose {target}+ real competitors that sell overlapping services to similar buyers in/around {region}.
 """
         data = await chat_completion_json(
             model=resolve_openai_model(),

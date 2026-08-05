@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from config.credential_config import config, resolve_supabase_api_key
 from db.connection import get_supabase
 from db.report_storage import fetch_stored_reports, save_competitor_report as persist_report
+from db.competitor_storage import delete_competitor_analysis
 
 AGENT_TYPE = "competitor"
 
@@ -577,6 +578,32 @@ async def get_stored_analysis_result(analysis_id: str | None = None) -> dict[str
             detail="No analysis data found. Run POST /competitor-analysis/analyze first.",
         )
     return _row_to_agent_result(analyses[0])
+
+
+async def delete_stored_analysis_result(analysis_id: str) -> dict[str, Any]:
+    """Delete a stored competitor analysis result (and related prompt/reports)."""
+    _ensure_storage_configured()
+    analysis_id = (analysis_id or "").strip()
+    if not analysis_id:
+        raise HTTPException(status_code=400, detail="analysis_id is required")
+
+    try:
+        deleted = await delete_competitor_analysis(analysis_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to delete analysis: {exc}",
+        ) from exc
+
+    return {
+        "success": True,
+        "message": "Competitor analysis result deleted",
+        **deleted,
+    }
 
 
 async def list_stored_analysis_results(

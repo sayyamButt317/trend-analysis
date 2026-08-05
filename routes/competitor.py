@@ -5,6 +5,7 @@ from agents.competitor.jobs import create_competitor_job, get_competitor_job
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
 from service.Competitor.analysis_details import (
     create_competitor_report,
+    delete_stored_analysis_result,
     get_competitor_analytics,
     get_stored_analysis_result,
     get_stored_report,
@@ -119,6 +120,18 @@ async def getStoredAnalysisResult(
 )
 async def getStoredAnalysisResultById(analysis_id: str):
     return await get_stored_analysis_result(analysis_id)
+
+
+@router.delete(
+    "/results/{analysis_id}",
+    summary="Delete a saved competitor-agent result",
+    description=(
+        "Deletes the stored analysis row for this analysis_id, plus related reports "
+        "and the orphaned prompt row when nothing else references it."
+    ),
+)
+async def deleteStoredAnalysisResult(analysis_id: str):
+    return await delete_stored_analysis_result(analysis_id)
 
 
 @router.get(

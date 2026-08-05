@@ -71,44 +71,45 @@ class CompetitorAnalysisRequest(BaseModel):
         min_length=20,
         description="Full company details text (services, team, positioning, ideal clients, etc.)",
         examples=[
-            "Techtimize LLC is a US-registered IT company founded in 2023. "
-            "Services: AI Development, Web Application Development, Staff Augmentation..."
+            "Acme Health is a clinic network offering telemedicine and diagnostics in Dubai. "
+            "Services: general practice, lab tests, home visits..."
         ],
     )
     region: str = Field(
         ...,
         min_length=2,
         description="Target region to find competitors in",
-        examples=["GCC", "MENA", "North America", "Europe", "United Arab Emirates"],
+        examples=["GCC", "MENA", "North America", "Europe", "United Arab Emirates", "Pakistan"],
     )
     instagram_username: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("instagram_username", "instausername"),
         serialization_alias="instagram_username",
         description="Your company's Instagram @handle — used to analyze your content before finding competitors.",
-        examples=["techtimize"],
+        examples=["acmehealth"],
     )
     company_name: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("company_name", "companyname"),
         serialization_alias="company_name",
         description="Your company name — used to build the LinkedIn posts URL dynamically.",
-        examples=["Techtimize"],
+        examples=["Acme Health"],
     )
     linkedin_url: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("linkedin_url", "linkedinurl"),
         serialization_alias="linkedin_url",
         description="Optional LinkedIn override. By default the posts URL is built from company_name.",
-        examples=["https://www.linkedin.com/company/techtimize/"],
+        examples=["https://www.linkedin.com/company/acme-health/"],
     )
     competitors: Optional[list[str]] = Field(
         default=None,
         description=(
             "Optional list of competitor names or Instagram handles (@user). "
-            "When provided, analysis runs only on these accounts and skips auto-discovery."
+            "When provided, analysis runs only on these accounts and skips auto-discovery. "
+            "Omit to auto-discover peers from company DNA + region (multi-tenant SaaS)."
         ),
-        examples=[["@competitor1", "Acme Software Lahore"]],
+        examples=[["@rivalclinic", "City Diagnostics Dubai"]],
     )
     competitor_limit: Optional[int] = Field(
         default=None,

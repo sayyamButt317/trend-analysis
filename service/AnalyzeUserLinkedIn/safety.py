@@ -10,7 +10,6 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Practical caps used by competitor analysis nodes.
 USER_EMPLOYEE_LIMIT = int(os.getenv("LINKEDIN_USER_EMPLOYEE_LIMIT") or 100)
 COMPETITOR_EMPLOYEE_LIMIT = int(os.getenv("LINKEDIN_COMPETITOR_EMPLOYEE_LIMIT") or 20)
 

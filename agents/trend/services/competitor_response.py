@@ -234,7 +234,15 @@ def build_competitor_response(
     )
 
     post_count = len(processed_posts)
-    success = not error and post_count > 0
+    competitor_count = len(competitor_profiles)
+    # Success if we produced competitor intel (even when IG posts are empty).
+    # Failed only when the pipeline errored with zero competitors.
+    if error and competitor_count == 0:
+        success = False
+    elif competitor_count > 0 or post_count > 0:
+        success = True
+    else:
+        success = not error
     content_usage = build_market_content_usage(content_mix, processed_posts)
 
     market_insights = {

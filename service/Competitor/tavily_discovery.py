@@ -6,6 +6,7 @@ from urllib.parse import urlparse
 from config.credential_config import config
 from models.search import DiscoveryCandidate
 from scrapper.tavily_retry import tavily_search_with_retry
+from service.Competitor.competitor_name_filters import is_junk_competitor
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,12 @@ BLOCKED_DOMAINS = frozenset(
         "wikipedia.org",
         "indeed.com",
         "glassdoor.com",
+        "techbehemoths.com",
+        "themanifest.com",
+        "clutch.co",
+        "goodfirms.co",
+        "designrush.com",
+        "sortlist.com",
     }
 )
 
@@ -104,6 +111,8 @@ class TavilyDiscoveryService:
                 if not url:
                     continue
                 title = (item.get("title") or "").strip()[:120]
+                if is_junk_competitor({"name": title, "website": url}):
+                    continue
                 dedupe_key = _candidate_dedupe_key(url, title)
                 if dedupe_key in seen_keys:
                     continue

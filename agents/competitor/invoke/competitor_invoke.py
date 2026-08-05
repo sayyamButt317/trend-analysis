@@ -98,12 +98,23 @@ async def competitorAnalysisAgent(
             post_count = len(final_state.get("processed_posts") or [])
             has_error = bool(final_state.get("error"))
             duration_sec = round(time.time() - start_time, 3)
+            final_competitors = (
+                final_state.get("discovered_influencers")
+                or final_state.get("competitors")
+                or final_state.get("verified_competitors")
+                or []
+            )
+            competitor_count = len(final_competitors)
+            if has_error and competitor_count == 0:
+                run_status = "failed"
+            elif post_count > 0 and not has_error:
+                run_status = "success"
+            elif competitor_count > 0:
+                run_status = "partial" if has_error or post_count == 0 else "success"
+            else:
+                run_status = "failed"
             meta = {
-                "status": (
-                    "success"
-                    if not has_error and post_count > 0
-                    else "partial" if post_count > 0 else "failed"
-                ),
+                "status": run_status,
                 "duration_sec": duration_sec,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "platforms": ["instagram", "linkedin"],
@@ -118,14 +129,14 @@ async def competitorAnalysisAgent(
             log_pipeline_complete(
                 status=meta["status"],
                 duration_sec=duration_sec,
-                competitors=len(final_state.get("discovered_influencers") or []),
+                competitors=competitor_count,
                 posts=post_count,
                 error=str(final_state.get("error") or "")[:120] or None,
             )
             result = build_competitor_response(
                 company=company_payload,
                 filters=final_state.get("config", {}).get("filters_applied") or filters_applied,
-                competitors=final_state.get("discovered_influencers") or [],
+                competitors=final_competitors,
                 processed_posts=final_state.get("processed_posts") or [],
                 content_mix=final_state.get("content_mix") or [],
                 topics=final_state.get("topics") or [],

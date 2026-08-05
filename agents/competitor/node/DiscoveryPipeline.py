@@ -12,8 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
-    """Run Tavily + Firecrawl + social discovery and verify candidates."""
-    # User-profile warnings (e.g. LinkedIn checkpoint) must not block competitor discovery.
     fatal = state.get("error") or ""
     if fatal and "rate limit" in fatal.lower():
         return state
@@ -89,6 +87,15 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
     )
 
     state["discovery_candidates"] = candidates
+    verified = [
+        {
+            **item,
+            "authenticity": item.get("authenticity") or "intelligence_pipeline",
+            "source": item.get("source") or "tavily+firecrawl+social",
+            "discovery_source": "tavily+firecrawl+social",
+        }
+        for item in verified
+    ]
     state["verified_competitors"] = verified
     state["discovered_influencers"] = verified
     state["competitors"] = verified
@@ -96,6 +103,7 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
         **(state.get("company_analysis") or {}),
         "intelligence": intelligence.model_dump(),
     }
+
     config["discovery_source"] = "tavily+firecrawl+social"
     config["filters_applied"] = {
         **(config.get("filters_applied") or {}),
@@ -104,6 +112,7 @@ async def DiscoveryPipelineNode(state: CompetitorState) -> CompetitorState:
         "candidate_pool_size": len(candidates),
         "verified_count": len(verified),
         "matching_mode": "intelligence_pipeline",
+        "discovery_source": "tavily+firecrawl+social",
     }
     state["config"] = config
 

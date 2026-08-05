@@ -21,6 +21,7 @@ class TrendState(TypedDict, total=False):
     trend_summary: str
     saved_trend_id: Optional[str]
     discovered_influencers: list[dict[str, Any]]
+    competitors: list[dict[str, Any]]
     viral_sounds: list[dict[str, Any]]
     viral_categories: list[dict[str, Any]]
     audio_summary: list[dict[str, Any]]

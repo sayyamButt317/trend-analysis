@@ -1,6 +1,7 @@
 import logging
 from typing import Any
 from models.company import CompanyProfile
+from service.Competitor.competitor_name_filters import is_junk_competitor
 from service.Competitor.competitor_ranker import CompetitorRanker
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,8 @@ class CompanyVerifier:
         verified: list[dict[str, Any]] = []
         min_score = 0.28
         for candidate in candidates:
+            if is_junk_competitor(candidate):
+                continue
             name = (candidate.get("name") or "").lower()
             if not name or any(term in name for term in EXCLUDED_NAME_TERMS):
                 continue
