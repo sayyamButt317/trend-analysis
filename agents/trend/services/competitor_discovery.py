@@ -41,6 +41,27 @@ GCC_CITIES = ("Dubai", "Abu Dhabi", "Riyadh", "Jeddah", "Doha", "Kuwait City", "
 MENA_CITIES = ("Cairo", "Amman", "Beirut", "Casablanca")
 PK_CITIES = ("Lahore", "Karachi", "Islamabad", "Rawalpindi")
 
+# Longest-first so "Limited" wins over "Ltd" style matches when checking endswith.
+COMPANY_SUFFIXES = (
+    " Private Limited",
+    " Pvt. Ltd.",
+    " Pvt Ltd",
+    " Pvt. Ltd",
+    " Corporation",
+    " Limited",
+    " L.L.C.",
+    " LLC",
+    " Ltd.",
+    " Ltd",
+    " Inc.",
+    " Inc",
+    " Corp.",
+    " Corp",
+    " Co.",
+    " Co",
+    " PLC",
+)
+
 
 def _expansion_cities(region: str | None, city: str | None) -> list[str]:
     cities: list[str] = []
@@ -117,9 +138,10 @@ def build_location_label(
 
 def _short_company_name(company_name: str) -> str:
     name = (company_name or "").strip()
+    lowered = name.lower()
     for suffix in COMPANY_SUFFIXES:
-        if name.endswith(suffix):
-            return name[: -len(suffix)].strip()
+        if lowered.endswith(suffix.lower()):
+            return name[: -len(suffix)].strip(" ,.-")
     return name
 
 

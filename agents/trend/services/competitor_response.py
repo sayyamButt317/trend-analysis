@@ -128,6 +128,13 @@ def build_competitor_response(
                 "match_reasons": source.get("match_reasons") or [],
                 "instagram_analysis": source.get("instagram_analysis"),
                 "linkedin_analysis": source.get("linkedin_analysis"),
+                "employees": source.get("employees") or [],
+                "employee_count": source.get("employee_count")
+                or len(source.get("employees") or []),
+                "job_openings": source.get("job_openings") or [],
+                "company_size": source.get("company_size"),
+                "is_hiring": source.get("is_hiring"),
+                "hiring_signals": source.get("hiring_signals") or [],
                 "social_warnings": source.get("social_warnings") or [],
                 "similarity": source.get("similarity"),
                 "content_strategy": {
@@ -148,45 +155,61 @@ def build_competitor_response(
         )
 
     for comp in competitors:
-        username = comp.get("username")
-        if username and not any(item["username"] == username for item in competitor_profiles):
-            competitor_profiles.append(
-                {
-                    "username": username,
-                    "name": comp.get("name"),
-                    "followers": comp.get("followers"),
-                    "profile_url": comp.get("profile_url"),
-                    "profile_picture_url": comp.get("profile_picture_url"),
-                    "image_url": comp.get("profile_picture_url"),
-                    "bio": comp.get("bio"),
-                    "website": comp.get("website"),
-                    "linkedin_url": comp.get("linkedin_url"),
-                    "linkedin_username": comp.get("linkedin_username"),
-                    "region_match": comp.get("region_match"),
-                    "niche_match": comp.get("niche_match"),
-                    "authenticity": comp.get("authenticity"),
-                    "discovered_by": comp.get("discovered_by"),
-                    "match_score": comp.get("match_score"),
-                    "match_reasons": comp.get("match_reasons") or [],
-                    "instagram_analysis": comp.get("instagram_analysis"),
-                    "linkedin_analysis": comp.get("linkedin_analysis"),
-                    "social_warnings": comp.get("social_warnings") or [],
-                    "content_strategy": {
-                        "post_count": 0,
-                        "primary_format": None,
-                        "primary_content_category": None,
-                        "content_focus": None,
-                        "media_types": [],
-                        "content_categories": [],
-                        "themes": [],
-                        "top_hashtags": [],
-                        "avg_engagement_rate": 0,
-                        "caption_style": {},
-                        "best_performing_format": None,
-                    },
-                    "posts": [],
-                }
+        username = (comp.get("username") or "").strip().lstrip("@").lower() or None
+        already = False
+        if username:
+            already = any(item.get("username") == username for item in competitor_profiles)
+        else:
+            already = any(
+                (item.get("name") or "").strip().lower() == (comp.get("name") or "").strip().lower()
+                for item in competitor_profiles
+                if item.get("name")
             )
+        if already:
+            continue
+        competitor_profiles.append(
+            {
+                "username": username,
+                "name": comp.get("name"),
+                "followers": comp.get("followers"),
+                "profile_url": comp.get("profile_url"),
+                "profile_picture_url": comp.get("profile_picture_url"),
+                "image_url": comp.get("profile_picture_url"),
+                "bio": comp.get("bio"),
+                "website": comp.get("website"),
+                "linkedin_url": comp.get("linkedin_url"),
+                "linkedin_username": comp.get("linkedin_username"),
+                "region_match": comp.get("region_match"),
+                "niche_match": comp.get("niche_match"),
+                "authenticity": comp.get("authenticity"),
+                "discovered_by": comp.get("discovered_by"),
+                "match_score": comp.get("match_score"),
+                "match_reasons": comp.get("match_reasons") or [],
+                "instagram_analysis": comp.get("instagram_analysis"),
+                "linkedin_analysis": comp.get("linkedin_analysis"),
+                "employees": comp.get("employees") or [],
+                "employee_count": comp.get("employee_count") or len(comp.get("employees") or []),
+                "job_openings": comp.get("job_openings") or [],
+                "company_size": comp.get("company_size"),
+                "is_hiring": comp.get("is_hiring"),
+                "hiring_signals": comp.get("hiring_signals") or [],
+                "social_warnings": comp.get("social_warnings") or [],
+                "content_strategy": {
+                    "post_count": 0,
+                    "primary_format": None,
+                    "primary_content_category": None,
+                    "content_focus": None,
+                    "media_types": [],
+                    "content_categories": [],
+                    "themes": [],
+                    "top_hashtags": [],
+                    "avg_engagement_rate": 0,
+                    "caption_style": {},
+                    "best_performing_format": None,
+                },
+                "posts": posts_by_username.get(username, []) if username else [],
+            }
+        )
 
     all_media = Counter(
         media["type"]

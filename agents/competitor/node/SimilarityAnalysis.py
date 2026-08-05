@@ -20,9 +20,9 @@ async def SimilarityAnalysisNode(state: CompetitorState) -> CompetitorState:
     company = CompanyProfile(**profile_data) if profile_data.get("name") else CompanyProfile(name="Company")
 
     competitors = (
-        state.get("verified_competitors")
-        or state.get("discovered_influencers")
+        state.get("discovered_influencers")
         or state.get("competitors")
+        or state.get("verified_competitors")
         or []
     )
 

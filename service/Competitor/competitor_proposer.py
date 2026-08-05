@@ -136,6 +136,10 @@ def _is_blocked_name(name: str) -> bool:
         "list of",
         "ranking",
         "peoplepakistan",
+        "zameen",
+        "olx",
+        "daraz",
+        "foodpanda",
     )
     return any(token in lowered for token in blocked)
 

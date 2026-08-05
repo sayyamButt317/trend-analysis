@@ -16,7 +16,9 @@ Hard rules:
    - LinkedIn company page URL (https://www.linkedin.com/company/...) when known; otherwise null
 6. Do not invent random Instagram handles. If unsure of IG, set instagram_username to null but still include the company with LinkedIn/website.
 7. Exclude the user's own company and any aliases.
-8. Return at least the requested count of distinct competitors (prefer more if confident).
+8. Exclude marketplaces, classifieds, media brands, HR portals, and unrelated industries
+   (e.g. real-estate portals like Zameen, news sites, food delivery) unless they clearly sell the same B2B IT/AI/software services.
+9. Return at least the requested count of distinct competitors (prefer more if confident).
 
 Return JSON only with this shape:
 {
