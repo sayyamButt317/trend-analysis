@@ -105,11 +105,17 @@ class CompetitorAnalysisRequest(BaseModel):
     competitors: Optional[list[str]] = Field(
         default=None,
         description=(
-            "Optional list of competitor names or Instagram handles (@user). "
-            "When provided, analysis runs only on these accounts and skips auto-discovery. "
-            "Omit to auto-discover peers from company DNA + region (multi-tenant SaaS)."
+            "Optional competitors. Mix any of: Instagram @handles, LinkedIn company URLs, "
+            "or company names. When provided, those competitors are used and auto-discovery is skipped. "
+            "Omit to auto-discover authentic peers from company DNA + region."
         ),
-        examples=[["@rivalclinic", "City Diagnostics Dubai"]],
+        examples=[
+            [
+                "@confiz",
+                "https://www.linkedin.com/company/systems-limited/",
+                "VentureDive",
+            ]
+        ],
     )
     competitor_limit: Optional[int] = Field(
         default=None,

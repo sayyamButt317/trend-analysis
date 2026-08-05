@@ -1,11 +1,28 @@
+"""Resolve user-provided competitors: Instagram handles, LinkedIn URLs, or company names."""
+
+from __future__ import annotations
+
 import logging
+import re
+from typing import Any
+
 from tavily import TavilyClient
+
 from config.credential_config import config
 from scrapper.instagram_finder.extractor import extract_username
 from scrapper.instagram_finder.validator import is_valid_instagram_username
-from scrapper.tavily_retry import tavily_search_with_retry
+from scrapper.tavily_retry import is_tavily_unreachable_error, tavily_search_with_retry
 
 logger = logging.getLogger(__name__)
+
+LINKEDIN_COMPANY_RE = re.compile(
+    r"(?:https?://)?(?:[\w.-]+\.)?linkedin\.com/company/([A-Za-z0-9\-_%]+)/?",
+    re.I,
+)
+INSTAGRAM_URL_RE = re.compile(
+    r"(?:https?://)?(?:www\.)?instagram\.com/([A-Za-z0-9._]+)/?",
+    re.I,
+)
 
 
 def normalize_competitor_inputs(values: list[str] | None) -> list[str]:
@@ -17,7 +34,7 @@ def normalize_competitor_inputs(values: list[str] | None) -> list[str]:
         text = (value or "").strip()
         if not text:
             continue
-        key = text.lower().lstrip("@")
+        key = text.lower().rstrip("/").lstrip("@")
         if key in seen:
             continue
         seen.add(key)
@@ -25,12 +42,59 @@ def normalize_competitor_inputs(values: list[str] | None) -> list[str]:
     return cleaned
 
 
-def _is_instagram_handle(value: str) -> bool:
-    handle = value.strip().lstrip("@").lower()
-    return bool(handle) and is_valid_instagram_username(handle)
+def _instagram_handle_from_input(value: str) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    url_match = INSTAGRAM_URL_RE.search(text)
+    if url_match:
+        handle = url_match.group(1).lower()
+        if handle in {"p", "reel", "reels", "stories", "explore", "accounts"}:
+            return None
+        return handle if is_valid_instagram_username(handle) else None
+
+    # Explicit @handle
+    if text.startswith("@"):
+        handle = text.lstrip("@").strip().lower()
+        return handle if is_valid_instagram_username(handle) else None
+
+    # Company names often have spaces or internal capitals (VentureDive).
+    if " " in text or any(ch.isupper() for ch in text[1:]):
+        return None
+    if "linkedin.com" in text.lower() or "/" in text:
+        return None
+
+    handle = text.strip().lower()
+    return handle if is_valid_instagram_username(handle) else None
 
 
-def _search_instagram_for_name_sync(client: TavilyClient, query: str) -> str | None:
+def _linkedin_url_from_input(value: str) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    match = LINKEDIN_COMPANY_RE.search(text)
+    if not match:
+        return None
+    slug = match.group(1).strip("/")
+    return f"https://www.linkedin.com/company/{slug}/"
+
+
+def _company_name_from_input(value: str, *, ig: str | None, linkedin: str | None) -> str:
+    text = (value or "").strip()
+    if ig and (text.lower().lstrip("@") == ig or "instagram.com" in text.lower()):
+        return ig
+    if linkedin:
+        match = LINKEDIN_COMPANY_RE.search(text)
+        if match:
+            slug = match.group(1).replace("-", " ").replace("_", " ").strip()
+            return slug.title() if slug else text
+    return text.lstrip("@").strip() or "Competitor"
+
+
+def _search_instagram_for_name_sync(
+    client: TavilyClient,
+    query: str,
+) -> str | None:
     response = tavily_search_with_retry(
         client,
         query=f'site:instagram.com "{query}"',
@@ -40,6 +104,7 @@ def _search_instagram_for_name_sync(client: TavilyClient, query: str) -> str | N
         include_answer=False,
         include_raw_content=False,
         include_images=False,
+        count_as_linkedin=False,
     )
     if not response:
         return None
@@ -50,73 +115,188 @@ def _search_instagram_for_name_sync(client: TavilyClient, query: str) -> str | N
     return None
 
 
+def _search_linkedin_for_name_sync(
+    client: TavilyClient,
+    query: str,
+) -> str | None:
+    response = tavily_search_with_retry(
+        client,
+        query=f'site:linkedin.com/company "{query}"',
+        search_depth="basic",
+        topic="general",
+        max_results=5,
+        include_answer=False,
+        include_raw_content=False,
+        include_images=False,
+        count_as_linkedin=True,
+    )
+    if not response:
+        return None
+    for result in response.get("results") or []:
+        url = result.get("url") or ""
+        match = LINKEDIN_COMPANY_RE.search(url)
+        if match:
+            return f"https://www.linkedin.com/company/{match.group(1).strip('/')}/"
+    return None
+
+
+def _candidate_payload(
+    *,
+    name: str,
+    username: str | None = None,
+    linkedin_url: str | None = None,
+    discovered_by: str,
+    raw_input: str,
+) -> dict[str, Any]:
+    socials: dict[str, str] = {}
+    if username:
+        socials["instagram"] = username
+    if linkedin_url:
+        socials["linkedin"] = linkedin_url
+    return {
+        "name": name,
+        "username": username,
+        "instagram_username": username,
+        "linkedin_url": linkedin_url,
+        "profile_url": f"https://www.instagram.com/{username}/" if username else None,
+        "socials": socials,
+        "source": "manual",
+        "authenticity": "manual",
+        "discovery_source": "manual",
+        "discovered_by": discovered_by,
+        "raw_input": raw_input,
+        "match_score": 1.0,
+        "match_reasons": [f"User-provided competitor ({discovered_by})"],
+        "region_match": True,
+        "niche_match": True,
+    }
+
+
 async def resolve_manual_competitors(
     competitors: list[str],
     *,
     region: str | None = None,
 ) -> tuple[list[dict], list[str]]:
+    """
+    Resolve tenant-provided competitors.
+
+    Accepted input forms (mixed list OK):
+    - Instagram handle: "@confiz" or "confiz" or instagram.com/confiz
+    - LinkedIn company URL: https://www.linkedin.com/company/confiz/
+    - Company name only: "Confiz" (resolved via Tavily to IG and/or LinkedIn)
+    """
     inputs = normalize_competitor_inputs(competitors)
     if not inputs:
         return [], []
 
     warnings: list[str] = []
     candidates: list[dict] = []
-    seen_handles: set[str] = set()
-    names_to_search: list[str] = []
+    seen_keys: set[str] = set()
+    needs_lookup: list[tuple[str, dict[str, Any]]] = []
 
     for item in inputs:
-        if _is_instagram_handle(item):
-            handle = item.strip().lstrip("@").lower()
-            if handle in seen_handles:
-                continue
-            seen_handles.add(handle)
-            candidates.append(
-                {
-                    "username": handle,
-                    "name": item.strip().lstrip("@"),
-                    "profile_url": f"https://www.instagram.com/{handle}/",
-                    "source": "manual",
-                    "discovered_by": "user_provided_handle",
-                    "match_score": 1.0,
-                    "match_reasons": ["User-provided competitor handle"],
-                }
-            )
-        else:
-            names_to_search.append(item)
+        ig = _instagram_handle_from_input(item)
+        linkedin = _linkedin_url_from_input(item)
+        name = _company_name_from_input(item, ig=ig, linkedin=linkedin)
 
-    if names_to_search:
-        if not config.TRAVILY_API_KEY:
+        # Pure handle or LinkedIn URL — accept immediately.
+        if ig or linkedin:
+            key = (ig or "") or (linkedin or "").rstrip("/").lower()
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            discovered = (
+                "user_provided_handle"
+                if ig and not linkedin
+                else "user_provided_linkedin"
+                if linkedin and not ig
+                else "user_provided_socials"
+            )
+            candidates.append(
+                _candidate_payload(
+                    name=name,
+                    username=ig,
+                    linkedin_url=linkedin,
+                    discovered_by=discovered,
+                    raw_input=item,
+                )
+            )
+            continue
+
+        # Company name — may need Tavily to fill IG/LinkedIn.
+        needs_lookup.append((item, {"name": name}))
+
+    if needs_lookup:
+        api_key = (config.TRAVILY_API_KEY or "").strip()
+        if not api_key:
+            for raw, meta in needs_lookup:
+                # Keep name-only peers so LinkedIn analysis can still run after later fill.
+                key = meta["name"].lower()
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                candidates.append(
+                    _candidate_payload(
+                        name=meta["name"],
+                        discovered_by="user_provided_name",
+                        raw_input=raw,
+                    )
+                )
             warnings.append(
-                "TRAVILY_API_KEY is not configured; company names could not be resolved to "
-                "Instagram handles. Provide @handles instead."
+                "TRAVILY_API_KEY missing — kept company names without resolving Instagram/LinkedIn."
             )
         else:
-            client = TavilyClient(api_key=config.TRAVILY_API_KEY)
+            client = TavilyClient(api_key=api_key)
             location_suffix = f" {region}".strip() if region else ""
-            for name in names_to_search:
-                query = f"{name}{location_suffix} instagram".strip()
-                handle = _search_instagram_for_name_sync(client, query)
-                if not handle:
-                    warnings.append(f"Could not find Instagram account for '{name}'.")
+            for raw, meta in needs_lookup:
+                name = meta["name"]
+                handle: str | None = None
+                linkedin_url: str | None = None
+                try:
+                    handle = _search_instagram_for_name_sync(
+                        client, f"{name}{location_suffix}".strip()
+                    )
+                    linkedin_url = _search_linkedin_for_name_sync(
+                        client, f"{name}{location_suffix}".strip()
+                    )
+                except Exception as exc:
+                    if not is_tavily_unreachable_error(exc):
+                        logger.warning("Manual competitor lookup failed for %s: %s", name, exc)
+                    warnings.append(f"Lookup failed for '{name}': {exc}")
+
+                key = (handle or "") or (linkedin_url or "").rstrip("/").lower() or name.lower()
+                if key in seen_keys:
                     continue
-                if handle in seen_handles:
-                    continue
-                seen_handles.add(handle)
+                seen_keys.add(key)
+
+                if not handle and not linkedin_url:
+                    warnings.append(
+                        f"Could not resolve Instagram/LinkedIn for '{name}'; keeping name for analysis."
+                    )
                 candidates.append(
-                    {
-                        "username": handle,
-                        "name": name,
-                        "profile_url": f"https://www.instagram.com/{handle}/",
-                        "source": "manual",
-                        "discovered_by": f"user_provided_name: {name}",
-                        "match_score": 1.0,
-                        "match_reasons": [f"Resolved from user-provided name: {name}"],
-                    }
+                    _candidate_payload(
+                        name=name,
+                        username=handle,
+                        linkedin_url=linkedin_url,
+                        discovered_by=f"user_provided_name: {name}",
+                        raw_input=raw,
+                    )
                 )
 
+    # Drop empty shells with no identity at all.
+    usable = [
+        c
+        for c in candidates
+        if c.get("username") or c.get("linkedin_url") or c.get("name")
+    ]
+
     logger.info(
-        "Manual competitor resolution: %s input(s) -> %s Instagram account(s)",
+        "Manual competitor resolution: %s input(s) -> %s competitor(s) "
+        "(ig=%s linkedin=%s name_only=%s)",
         len(inputs),
-        len(candidates),
+        len(usable),
+        sum(1 for c in usable if c.get("username")),
+        sum(1 for c in usable if c.get("linkedin_url")),
+        sum(1 for c in usable if not c.get("username") and not c.get("linkedin_url")),
     )
-    return candidates, warnings
+    return usable, warnings

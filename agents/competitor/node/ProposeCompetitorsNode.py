@@ -8,6 +8,7 @@ from typing import Any
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.services.company_social_analyzer import resolve_company_social_handles
+from agents.trend.services.manual_competitors import resolve_manual_competitors
 from service.Competitor.competitor_proposer import MIN_COMPETITORS, CompetitorProposerService
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ async def _fill_missing_socials(
     resolve_linkedin: bool,
     max_lookups: int = 10,
 ) -> list[dict[str, Any]]:
-    """Light Tavily fill only when OpenAI left Instagram/LinkedIn blank."""
+    """Light Tavily fill only when OpenAI/manual left Instagram/LinkedIn blank."""
     filled: list[dict[str, Any]] = []
     lookups = 0
     for item in competitors:
@@ -83,11 +84,51 @@ async def ProposeCompetitorsNode(state: CompetitorState) -> CompetitorState:
     if manual:
         log_event(
             "2_discovery",
-            "Skipping OpenAI proposal — manual competitors provided",
+            "Using user-provided competitors (skip auto-discovery)",
             count=len(manual),
+            region=region or None,
         )
+        candidates, warnings = await resolve_manual_competitors(manual, region=region or None)
+        resolve_linkedin = not bool(config.get("skip_linkedin"))
+        candidates = await _fill_missing_socials(
+            candidates,
+            region=region or None,
+            resolve_linkedin=resolve_linkedin,
+            max_lookups=min(10, competitor_limit),
+        )
+        candidates = candidates[:competitor_limit]
+        filters_applied = {
+            **(config.get("filters_applied") or {}),
+            "region": region,
+            "competitors": manual,
+            "competitor_limit": competitor_limit,
+            "matching_mode": "manual",
+            "discovery_source": "manual",
+            "discovery_warnings": warnings,
+        }
+        config["filters_applied"] = filters_applied
         config["filters"] = filters
+        config["discovery_source"] = "manual"
         state["config"] = config
+
+        if not candidates:
+            state["error"] = (
+                "Could not resolve any of the provided competitors. "
+                "Pass Instagram @handles, LinkedIn company URLs, or recognizable company names."
+            )
+            return state
+
+        state["verified_competitors"] = candidates
+        state["discovered_influencers"] = candidates
+        state["competitors"] = candidates
+        state.pop("error", None)
+        log_event(
+            "2_discovery",
+            "Manual competitors ready",
+            competitors=len(candidates),
+            with_instagram=sum(1 for c in candidates if c.get("username")),
+            with_linkedin=sum(1 for c in candidates if c.get("linkedin_url")),
+        )
         return state
 
     if not region:
@@ -148,7 +189,9 @@ async def ProposeCompetitorsNode(state: CompetitorState) -> CompetitorState:
     )
 
     with_ig = sum(1 for c in competitors if c.get("username"))
-    with_li = sum(1 for c in competitors if c.get("linkedin_url") or (c.get("socials") or {}).get("linkedin"))
+    with_li = sum(
+        1 for c in competitors if c.get("linkedin_url") or (c.get("socials") or {}).get("linkedin")
+    )
 
     filters_applied = {
         **(config.get("filters_applied") or {}),

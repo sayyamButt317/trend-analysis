@@ -56,7 +56,10 @@ async def find_competitors(
             return (
                 [],
                 filters_applied,
-                "No valid competitor Instagram accounts could be resolved from the names provided.",
+                (
+                    "No valid competitors could be resolved from the values provided. "
+                    "Use Instagram @handles, LinkedIn company URLs, and/or company names."
+                ),
             )
         return candidates[:competitor_limit], filters_applied, None
 
