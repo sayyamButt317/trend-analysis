@@ -121,7 +121,11 @@ class CompetitorAnalysisRequest(BaseModel):
         default=None,
         ge=1,
         le=50,
-        description="Max competitors to analyze (from request; default 10).",
+        description=(
+            "Max competitors to analyze. Optional. "
+            "If you provide `competitors`, defaults to that list length (analyzes all of them). "
+            "If auto-discovering, defaults to 10."
+        ),
     )
     post_limit: Optional[int] = Field(
         default=None,
@@ -193,11 +197,14 @@ class CompetitorAnalysisRequest(BaseModel):
     def to_agent_config(self) -> dict[str, Any]:
         company = self._company_with_socials()
         profile = runtime_profile()
-        competitor_limit = int(
-            self.competitor_limit
-            if self.competitor_limit is not None
-            else profile.get("competitor_limit") or 10
-        )
+        provided = list(self.competitors or [])
+        if self.competitor_limit is not None:
+            competitor_limit = int(self.competitor_limit)
+        elif provided:
+            # Manual list: analyze all provided peers unless user caps it.
+            competitor_limit = min(max(len(provided), 1), 50)
+        else:
+            competitor_limit = int(profile.get("competitor_limit") or 10)
         post_limit = self.post_limit or profile["post_limit"]
         exclude_usernames: list[str] = []
         if company.get("instagram_username"):
