@@ -3,7 +3,13 @@ import logging
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from models.company import CompanyProfile
-from service.Competitor.competitor_intelligence_report import build_competitor_intelligence_report
+from service.Competitor.competitor_intelligence_report import (
+    _competitor_lookup_key,
+    _user_entity,
+    build_competitor_intelligence_report,
+    compute_competitor_similarity,
+    similarity_to_percentages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,14 +48,39 @@ async def competitor_intelligence_node(state: CompetitorState) -> CompetitorStat
 
     state["competitor_intelligence_report"] = report
 
-    # Enrich similarity_scores with full 9-dimension breakdown
+    score_lookup = {
+        _competitor_lookup_key(item): item
+        for item in report.get("similarity_vs_competitors") or []
+        if _competitor_lookup_key(item)
+    }
+    enriched_competitors = []
+    for comp in competitors:
+        matched = score_lookup.get(_competitor_lookup_key(comp))
+        if matched:
+            similarity = matched.get("similarity") or {}
+            enriched_competitors.append(
+                {
+                    **comp,
+                    "similarity": similarity,
+                    "similarity_percentages": matched.get("similarity_percentages")
+                    or similarity_to_percentages(similarity),
+                    "match_score": matched.get("match_score") or similarity.get("overall"),
+                }
+            )
+        else:
+            enriched_competitors.append(comp)
+    state["discovered_influencers"] = enriched_competitors
+    state["competitors"] = enriched_competitors
+
     extended_scores = [
         {
             "name": item.get("name"),
             "username": item.get("username"),
             "website": item.get("website"),
             "similarity": item.get("similarity") or {},
-            "match_score": item.get("similarity", {}).get("overall"),
+            "similarity_percentages": item.get("similarity_percentages")
+            or similarity_to_percentages(item.get("similarity") or {}),
+            "match_score": item.get("match_score") or item.get("similarity", {}).get("overall"),
         }
         for item in report.get("similarity_vs_competitors") or []
     ]

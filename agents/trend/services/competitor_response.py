@@ -2,6 +2,46 @@ from collections import Counter
 from typing import Any
 from agents.trend.services.content_analyzer import build_market_content_usage
 from service.Competitor.competitor_analysis_sections import build_analysis_sections
+from service.Competitor.competitor_intelligence_report import (
+    _competitor_lookup_key,
+    similarity_to_percentages,
+)
+
+
+def _similarity_lookup(similarity_scores: list[dict] | None) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for item in similarity_scores or []:
+        key = _competitor_lookup_key(item)
+        if key:
+            lookup[key] = item
+    return lookup
+
+
+def _attach_similarity_fields(
+    profile: dict[str, Any],
+    *,
+    source: dict[str, Any],
+    score_lookup: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    matched = score_lookup.get(_competitor_lookup_key(source))
+    similarity = (
+        (matched or {}).get("similarity")
+        or source.get("similarity")
+        or {}
+    )
+    if similarity:
+        profile["similarity"] = similarity
+        profile["similarity_percentages"] = (
+            (matched or {}).get("similarity_percentages")
+            or source.get("similarity_percentages")
+            or similarity_to_percentages(similarity)
+        )
+        profile["match_score"] = (
+            (matched or {}).get("match_score")
+            or source.get("match_score")
+            or similarity.get("overall")
+        )
+    return profile
 
 
 def _normalize_media_type(post: dict) -> str:
@@ -100,6 +140,8 @@ def build_competitor_response(
         if username:
             posts_by_username.setdefault(username, []).append(_simplify_post(post))
 
+    score_lookup = _similarity_lookup(similarity_scores)
+
     competitor_profiles = []
     for item in content_mix:
         username = item.get("username")
@@ -107,52 +149,49 @@ def build_competitor_response(
             (comp for comp in competitors if comp.get("username") == username),
             {},
         )
-        competitor_profiles.append(
-            {
-                "username": username,
-                "name": source.get("name"),
-                "followers": source.get("followers"),
-                "profile_url": source.get("profile_url")
-                or f"https://www.instagram.com/{username}/",
-                "profile_picture_url": source.get("profile_picture_url"),
-                "image_url": source.get("profile_picture_url"),
-                "bio": source.get("bio"),
-                "website": source.get("website"),
-                "linkedin_url": source.get("linkedin_url"),
-                "linkedin_username": source.get("linkedin_username"),
-                "region_match": source.get("region_match"),
-                "niche_match": source.get("niche_match"),
-                "authenticity": source.get("authenticity"),
-                "discovered_by": source.get("discovered_by"),
-                "match_score": source.get("match_score"),
-                "match_reasons": source.get("match_reasons") or [],
-                "instagram_analysis": source.get("instagram_analysis"),
-                "linkedin_analysis": source.get("linkedin_analysis"),
-                "employees": source.get("employees") or [],
-                "employee_count": source.get("employee_count")
-                or len(source.get("employees") or []),
-                "job_openings": source.get("job_openings") or [],
-                "company_size": source.get("company_size"),
-                "is_hiring": source.get("is_hiring"),
-                "hiring_signals": source.get("hiring_signals") or [],
-                "social_warnings": source.get("social_warnings") or [],
-                "similarity": source.get("similarity"),
-                "content_strategy": {
-                    "post_count": item.get("post_count", 0),
-                    "primary_format": item.get("primary_format"),
-                    "primary_content_category": item.get("primary_content_category"),
-                    "content_focus": item.get("content_focus"),
-                    "media_types": item.get("media_types") or [],
-                    "content_categories": item.get("content_categories") or [],
-                    "themes": item.get("content_themes") or [],
-                    "top_hashtags": item.get("top_hashtags") or [],
-                    "avg_engagement_rate": item.get("avg_engagement_rate", 0),
-                    "caption_style": item.get("caption_style") or {},
-                    "best_performing_format": item.get("best_performing_format"),
-                },
-                "posts": posts_by_username.get(username, []),
-            }
-        )
+        profile = {
+            "username": username,
+            "name": source.get("name"),
+            "followers": source.get("followers"),
+            "profile_url": source.get("profile_url")
+            or f"https://www.instagram.com/{username}/",
+            "profile_picture_url": source.get("profile_picture_url"),
+            "image_url": source.get("profile_picture_url"),
+            "bio": source.get("bio"),
+            "website": source.get("website"),
+            "linkedin_url": source.get("linkedin_url"),
+            "linkedin_username": source.get("linkedin_username"),
+            "region_match": source.get("region_match"),
+            "niche_match": source.get("niche_match"),
+            "authenticity": source.get("authenticity"),
+            "discovered_by": source.get("discovered_by"),
+            "match_reasons": source.get("match_reasons") or [],
+            "instagram_analysis": source.get("instagram_analysis"),
+            "linkedin_analysis": source.get("linkedin_analysis"),
+            "employees": source.get("employees") or [],
+            "employee_count": source.get("employee_count")
+            or len(source.get("employees") or []),
+            "job_openings": source.get("job_openings") or [],
+            "company_size": source.get("company_size"),
+            "is_hiring": source.get("is_hiring"),
+            "hiring_signals": source.get("hiring_signals") or [],
+            "social_warnings": source.get("social_warnings") or [],
+            "content_strategy": {
+                "post_count": item.get("post_count", 0),
+                "primary_format": item.get("primary_format"),
+                "primary_content_category": item.get("primary_content_category"),
+                "content_focus": item.get("content_focus"),
+                "media_types": item.get("media_types") or [],
+                "content_categories": item.get("content_categories") or [],
+                "themes": item.get("content_themes") or [],
+                "top_hashtags": item.get("top_hashtags") or [],
+                "avg_engagement_rate": item.get("avg_engagement_rate", 0),
+                "caption_style": item.get("caption_style") or {},
+                "best_performing_format": item.get("best_performing_format"),
+            },
+            "posts": posts_by_username.get(username, []),
+        }
+        competitor_profiles.append(_attach_similarity_fields(profile, source=source, score_lookup=score_lookup))
 
     for comp in competitors:
         username = (comp.get("username") or "").strip().lstrip("@").lower() or None
@@ -167,49 +206,47 @@ def build_competitor_response(
             )
         if already:
             continue
-        competitor_profiles.append(
-            {
-                "username": username,
-                "name": comp.get("name"),
-                "followers": comp.get("followers"),
-                "profile_url": comp.get("profile_url"),
-                "profile_picture_url": comp.get("profile_picture_url"),
-                "image_url": comp.get("profile_picture_url"),
-                "bio": comp.get("bio"),
-                "website": comp.get("website"),
-                "linkedin_url": comp.get("linkedin_url"),
-                "linkedin_username": comp.get("linkedin_username"),
-                "region_match": comp.get("region_match"),
-                "niche_match": comp.get("niche_match"),
-                "authenticity": comp.get("authenticity"),
-                "discovered_by": comp.get("discovered_by"),
-                "match_score": comp.get("match_score"),
-                "match_reasons": comp.get("match_reasons") or [],
-                "instagram_analysis": comp.get("instagram_analysis"),
-                "linkedin_analysis": comp.get("linkedin_analysis"),
-                "employees": comp.get("employees") or [],
-                "employee_count": comp.get("employee_count") or len(comp.get("employees") or []),
-                "job_openings": comp.get("job_openings") or [],
-                "company_size": comp.get("company_size"),
-                "is_hiring": comp.get("is_hiring"),
-                "hiring_signals": comp.get("hiring_signals") or [],
-                "social_warnings": comp.get("social_warnings") or [],
-                "content_strategy": {
-                    "post_count": 0,
-                    "primary_format": None,
-                    "primary_content_category": None,
-                    "content_focus": None,
-                    "media_types": [],
-                    "content_categories": [],
-                    "themes": [],
-                    "top_hashtags": [],
-                    "avg_engagement_rate": 0,
-                    "caption_style": {},
-                    "best_performing_format": None,
-                },
-                "posts": posts_by_username.get(username, []) if username else [],
-            }
-        )
+        profile = {
+            "username": username,
+            "name": comp.get("name"),
+            "followers": comp.get("followers"),
+            "profile_url": comp.get("profile_url"),
+            "profile_picture_url": comp.get("profile_picture_url"),
+            "image_url": comp.get("profile_picture_url"),
+            "bio": comp.get("bio"),
+            "website": comp.get("website"),
+            "linkedin_url": comp.get("linkedin_url"),
+            "linkedin_username": comp.get("linkedin_username"),
+            "region_match": comp.get("region_match"),
+            "niche_match": comp.get("niche_match"),
+            "authenticity": comp.get("authenticity"),
+            "discovered_by": comp.get("discovered_by"),
+            "match_reasons": comp.get("match_reasons") or [],
+            "instagram_analysis": comp.get("instagram_analysis"),
+            "linkedin_analysis": comp.get("linkedin_analysis"),
+            "employees": comp.get("employees") or [],
+            "employee_count": comp.get("employee_count") or len(comp.get("employees") or []),
+            "job_openings": comp.get("job_openings") or [],
+            "company_size": comp.get("company_size"),
+            "is_hiring": comp.get("is_hiring"),
+            "hiring_signals": comp.get("hiring_signals") or [],
+            "social_warnings": comp.get("social_warnings") or [],
+            "content_strategy": {
+                "post_count": 0,
+                "primary_format": None,
+                "primary_content_category": None,
+                "content_focus": None,
+                "media_types": [],
+                "content_categories": [],
+                "themes": [],
+                "top_hashtags": [],
+                "avg_engagement_rate": 0,
+                "caption_style": {},
+                "best_performing_format": None,
+            },
+            "posts": posts_by_username.get(username, []) if username else [],
+        }
+        competitor_profiles.append(_attach_similarity_fields(profile, source=comp, score_lookup=score_lookup))
 
     all_media = Counter(
         media["type"]
@@ -235,8 +272,6 @@ def build_competitor_response(
 
     post_count = len(processed_posts)
     competitor_count = len(competitor_profiles)
-    # Success if we produced competitor intel (even when IG posts are empty).
-    # Failed only when the pipeline errored with zero competitors.
     if error and competitor_count == 0:
         success = False
     elif competitor_count > 0 or post_count > 0:
@@ -280,6 +315,7 @@ def build_competitor_response(
         content_mix=content_mix,
         market_insights=market_insights,
         competitors=competitor_profiles,
+        processed_posts=processed_posts,
     )
 
     return {
@@ -305,6 +341,7 @@ def build_competitor_response(
         "post_count": post_count,
         "competitors": competitor_profiles,
         "analysis": analysis,
+        "strategic_insights": analysis.get("strategic_insights") or {},
         "market_insights": market_insights,
         "meta": meta,
         "company_profile": company_profile or {},

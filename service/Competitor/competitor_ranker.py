@@ -1,6 +1,8 @@
 import logging
 from typing import Any
+
 from models.company import CompanyProfile
+from service.Competitor.signal_extractor import collect_text_blobs, extract_technologies_mentioned
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,42 @@ def _overlap_score(a: list[str], b: list[str]) -> float:
     return min(len(hits) / max(len(set_a), 1), 1.0)
 
 
+def _text_term_overlap(user_terms: list[str], text: str) -> float:
+    terms = {item.lower().strip() for item in user_terms if item and len(str(item).strip()) > 1}
+    if not terms:
+        return 0.0
+    lowered = (text or "").lower()
+    hits = sum(1 for term in terms if term in lowered)
+    return min(hits / max(len(terms), 1), 1.0)
+
+
+def _candidate_service_terms(candidate: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    terms.extend(candidate.get("services") or [])
+    terms.extend(candidate.get("website_services") or [])
+    terms.extend(candidate.get("specialties") or [])
+    intel = candidate.get("website_intelligence") or {}
+    terms.extend(intel.get("services") or [])
+    li = candidate.get("linkedin_analysis") or {}
+    for item in li.get("specialties") or []:
+        terms.append(str(item))
+    ig = candidate.get("instagram_analysis") or {}
+    if ig.get("content_focus"):
+        terms.append(str(ig["content_focus"]))
+    return terms
+
+
+def _candidate_tech_terms(candidate: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    terms.extend(candidate.get("technologies") or [])
+    intel = candidate.get("website_intelligence") or {}
+    terms.extend(intel.get("technologies") or [])
+    li = candidate.get("linkedin_analysis") or {}
+    terms.extend(li.get("technologies_mentioned") or [])
+    terms.extend(extract_technologies_mentioned(collect_text_blobs(candidate)))
+    return terms
+
+
 def _text_hits(text: str, terms: tuple[str, ...]) -> bool:
     lowered = (text or "").lower()
     return any(term in lowered for term in terms)
@@ -52,35 +90,67 @@ class CompetitorRanker:
         *,
         region: str | None = None,
     ) -> dict[str, Any]:
-        text = " ".join(
-            [
-                candidate.get("name") or "",
-                candidate.get("description") or "",
-                candidate.get("website") or "",
-                candidate.get("source_query") or "",
-            ]
-        ).lower()
+        text = collect_text_blobs(candidate).lower()
+        if not text.strip():
+            text = " ".join(
+                [
+                    candidate.get("name") or "",
+                    candidate.get("description") or "",
+                    candidate.get("bio") or "",
+                    candidate.get("website") or "",
+                    candidate.get("source_query") or "",
+                ]
+            ).lower()
 
         industry_score = _overlap_score(
             [company.industry or "", company.category or "", company.niche or ""],
-            [candidate.get("industry") or "", candidate.get("description") or ""],
+            [
+                candidate.get("industry") or "",
+                candidate.get("description") or "",
+                (candidate.get("linkedin_analysis") or {}).get("industry") or "",
+            ],
         )
         if industry_score < 0.2 and company.industry and company.industry.lower() in text:
             industry_score = 0.6
 
-        service_score = _overlap_score(company.services, [text])
+        candidate_services = _candidate_service_terms(candidate)
+        service_score = max(
+            _overlap_score(company.services, candidate_services),
+            _text_term_overlap(company.services, text),
+            _overlap_score(company.products, candidate_services),
+            _text_term_overlap(company.products, text),
+        )
         intel = candidate.get("website_intelligence") or {}
         if intel.get("services"):
             service_score = max(service_score, _overlap_score(company.services, intel["services"]))
-        product_score = _overlap_score(company.products, [text])
-        audience_score = _overlap_score(company.target_audience, [text])
-        tech_score = _overlap_score(company.technologies, [text])
+        product_score = _overlap_score(company.products, candidate_services)
+        audience_score = max(
+            _overlap_score(company.target_audience, candidate_services),
+            _text_term_overlap(company.target_audience, text),
+        )
+        candidate_tech = _candidate_tech_terms(candidate)
+        tech_score = max(
+            _overlap_score(company.technologies, candidate_tech),
+            _text_term_overlap(company.technologies, text),
+        )
         if intel.get("technologies"):
             tech_score = max(tech_score, _overlap_score(company.technologies, intel["technologies"]))
 
         pricing_score = 0.5 if (company.pricing_model or "").lower() in text else 0.0
-        content_score = 0.4 if candidate.get("linkedin_analysis") or candidate.get("instagram_analysis") else 0.2
-        social_score = 0.5 if candidate.get("instagram_analysis") else 0.2
+        ig = candidate.get("instagram_analysis") or {}
+        li = candidate.get("linkedin_analysis") or {}
+        content_score = 0.15
+        if ig or li:
+            content_score = 0.35
+        if ig.get("content_themes") or li.get("content_themes"):
+            content_score = max(content_score, 0.45)
+        if ig.get("top_hashtags") or li.get("sample_posts"):
+            content_score = max(content_score, 0.55)
+        social_score = 0.25
+        if ig:
+            social_score = max(social_score, 0.45)
+        if li:
+            social_score = max(social_score, 0.5)
 
         region_terms = _region_terms(region, company)
         source_query = (candidate.get("source_query") or "").lower()

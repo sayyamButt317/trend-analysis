@@ -18,6 +18,15 @@ SERVICE_PATTERNS = (
     r"IT services",
     r"custom software",
     r"MVP development",
+    r"AI-native software",
+    r"AI-native solutions",
+    r"AI-native development",
+    r"AI-native services",
+    r"AI-native products",
+    r"AI-native solutions",
+    r"AI-native development",
+    r"AI-native services",
+    r"AI-native products",
 )
 
 TECH_PATTERNS = (
@@ -31,6 +40,7 @@ TECH_PATTERNS = (
     r"Node\.js",
     r"Flutter",
     r"DevOps",
+    r"No-code/low-code development",
 )
 
 INDUSTRY_PATTERNS = (
@@ -41,6 +51,38 @@ INDUSTRY_PATTERNS = (
     r"enterprise",
     r"SMB",
     r"government",
+    r"healthcare",
+    r"education",
+    r"transportation",
+    r"energy",
+    r"utilities",
+    r"construction",
+    r"manufacturing",
+    r"retail",
+    r"wholesale",
+    r"clothing",
+    r"food",
+    r"beverage",
+    r"pharmaceutical",
+    r"medical",
+    r"biotechnology",
+    r"agriculture",
+    r"forestry",
+    r"fishing",
+    r"mining",
+    r"oil",
+    r"gas",
+    r"petroleum",
+    r"chemicals",
+    r" plastics",
+    r"paper",
+    r"wood",
+    r"cement",
+    r"steel",
+    r"glass",
+    r"ceramics",
+    r"rubber",
+    r"leather",
 )
 
 SECTION_HEADERS = {

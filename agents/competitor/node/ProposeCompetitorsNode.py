@@ -148,13 +148,18 @@ async def ProposeCompetitorsNode(state: CompetitorState) -> CompetitorState:
     try:
         proposer = CompetitorProposerService()
         competitors, meta = await proposer.propose(
-            company=company,
-            company_profile=company_profile,
-            company_analysis=company_analysis,
-            region=region,
-            limit=competitor_limit,
-            hints=list(company.get("competitors_hint") or company_profile.get("competitors_hint") or []),
-        )
+        company=company,
+        company_profile=company_profile,
+        company_analysis=company_analysis,
+        company_signals=config.get("company_signals"),
+        discovery_features=config.get("discovery_features"),
+        instagram_analysis=state.get("user_instagram"),
+    linkedin_analysis=state.get("user_linkedin"),
+    website_intelligence=state.get("website_intelligence"),
+    region=region,
+    limit=competitor_limit,
+    hints=...
+)
     except Exception as exc:
         logger.exception("OpenAI competitor proposal failed")
         filters_applied = {

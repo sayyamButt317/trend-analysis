@@ -3,7 +3,7 @@ from collections import Counter
 from typing import Any
 
 from models.company import CompanyProfile
-from service.Competitor.competitor_ranker import CompetitorRanker
+from service.Competitor.competitor_ranker import CompetitorRanker, _region_terms, _text_hits
 from service.Competitor.signal_extractor import (
     build_extended_linkedin_profile,
     collect_text_blobs,
@@ -40,6 +40,178 @@ BUSINESS_SIGNAL_KEYS = (
 )
 
 REVIEW_PLATFORMS = ("clutch", "g2", "trustpilot", "google_reviews")
+
+UI_SIMILARITY_KEYS = (
+    "overall",
+    "services",
+    "technology",
+    "marketing",
+    "content",
+    "location",
+)
+
+
+def similarity_to_percentages(similarity: dict[str, Any]) -> dict[str, int]:
+    """Map 0-1 similarity scores to 0-100 percentages for the overview table."""
+    return {
+        "overall": round(float(similarity.get("overall") or 0) * 100),
+        "services": round(float(similarity.get("services") or 0) * 100),
+        "tech": round(float(similarity.get("technology") or similarity.get("tech") or 0) * 100),
+        "marketing": round(float(similarity.get("marketing") or 0) * 100),
+        "content": round(float(similarity.get("content") or 0) * 100),
+        "location": round(float(similarity.get("location") or 0) * 100),
+    }
+
+
+def _competitor_lookup_key(item: dict[str, Any]) -> str:
+    username = (item.get("username") or "").strip().lstrip("@").lower()
+    if username:
+        return f"u:{username}"
+    name = (item.get("name") or "").strip().lower()
+    if name:
+        return f"n:{name}"
+    website = (item.get("website") or "").strip().lower()
+    if website:
+        return f"w:{website}"
+    return ""
+
+
+def _term_list_overlap(a: list[str], b: list[str]) -> float:
+    set_a = {str(item).lower().strip() for item in a if item and str(item).strip()}
+    set_b = {str(item).lower().strip() for item in b if item and str(item).strip()}
+    if not set_a or not set_b:
+        return 0.0
+    direct = len(set_a & set_b) / max(len(set_a), 1)
+    partial_hits = 0
+    for left in set_a:
+        for right in set_b:
+            if left in right or right in left:
+                partial_hits += 1
+                break
+    partial = partial_hits / max(len(set_a), 1)
+    return round(min(max(direct, partial * 0.75), 1.0), 3)
+
+
+def _service_terms(entity: dict[str, Any], company: CompanyProfile | None = None) -> list[str]:
+    terms: list[str] = []
+    if company:
+        terms.extend(company.services or [])
+        terms.extend(company.products or [])
+    terms.extend(entity.get("services") or [])
+    terms.extend(entity.get("website_services") or [])
+    terms.extend(entity.get("specialties") or [])
+    intel = entity.get("website_intelligence") or {}
+    terms.extend(intel.get("services") or [])
+    li = entity.get("linkedin_analysis") or {}
+    terms.extend(str(item) for item in (li.get("specialties") or []))
+    ig = entity.get("instagram_analysis") or {}
+    if ig.get("content_focus"):
+        terms.append(str(ig["content_focus"]))
+    for category in ig.get("content_categories") or []:
+        if isinstance(category, dict):
+            terms.append(str(category.get("category") or ""))
+        else:
+            terms.append(str(category))
+    return [term for term in terms if term and str(term).strip()]
+
+
+def _technology_terms(entity: dict[str, Any], company: CompanyProfile | None = None) -> list[str]:
+    terms: list[str] = []
+    if company:
+        terms.extend(company.technologies or [])
+    terms.extend(entity.get("technologies") or [])
+    intel = entity.get("website_intelligence") or {}
+    terms.extend(intel.get("technologies") or [])
+    li = entity.get("linkedin_analysis") or {}
+    terms.extend(str(item) for item in (li.get("technologies_mentioned") or []))
+    terms.extend(extract_technologies_mentioned(collect_text_blobs(entity)))
+    return [term for term in terms if term and str(term).strip()]
+
+
+def _services_similarity(
+    user: dict[str, Any],
+    competitor: dict[str, Any],
+    company: CompanyProfile,
+) -> float:
+    user_terms = _service_terms(user, company)
+    comp_terms = _service_terms(competitor)
+    list_score = _term_list_overlap(user_terms, comp_terms)
+    user_text = collect_text_blobs(user).lower()
+    comp_text = collect_text_blobs(competitor).lower()
+    text_score = 0.0
+    for term in {str(item).lower().strip() for item in user_terms if item}:
+        if term in comp_text or any(term in other or other in term for other in comp_terms):
+            text_score += 1
+    text_score = text_score / max(len({str(item).lower().strip() for item in user_terms if item}), 1)
+    return round(min(max(list_score, text_score * 0.85), 1.0), 3)
+
+
+def _technology_similarity(
+    user: dict[str, Any],
+    competitor: dict[str, Any],
+    company: CompanyProfile,
+) -> float:
+    user_terms = _technology_terms(user, company)
+    comp_terms = _technology_terms(competitor)
+    return max(
+        _term_list_overlap(user_terms, comp_terms),
+        _term_list_overlap(
+            extract_technologies_mentioned(collect_text_blobs(user)),
+            extract_technologies_mentioned(collect_text_blobs(competitor)),
+        ),
+    )
+
+
+def _location_similarity(
+    user: dict[str, Any],
+    competitor: dict[str, Any],
+    company: CompanyProfile,
+    region: str | None,
+) -> float:
+    user_locations = {
+        str(value).lower().strip()
+        for value in (
+            company.city,
+            company.country,
+            company.region,
+            region,
+            user.get("city"),
+            user.get("country"),
+            user.get("region"),
+            user.get("headquarters"),
+        )
+        if value
+    }
+    comp_locations: set[str] = set()
+    for value in (
+        competitor.get("city"),
+        competitor.get("country"),
+        competitor.get("headquarters"),
+        (competitor.get("linkedin_analysis") or {}).get("headquarters"),
+        (competitor.get("linkedin_analysis") or {}).get("location"),
+    ):
+        if value:
+            comp_locations.add(str(value).lower().strip())
+
+    comp_text = collect_text_blobs(competitor).lower()
+    score = 0.0
+    for user_loc in user_locations:
+        for comp_loc in comp_locations:
+            if user_loc in comp_loc or comp_loc in user_loc:
+                score = max(score, 0.95)
+        if user_loc in comp_text:
+            score = max(score, 0.75)
+
+    region_terms = _region_terms(region, company)
+    if region_terms and _text_hits(comp_text, region_terms):
+        score = max(score, 0.65)
+    if company.country and company.country.lower() in comp_text:
+        score = max(score, 0.7)
+    if company.city and company.city.lower() in comp_text:
+        score = max(score, 0.85)
+    if competitor.get("region_match") is True:
+        score = max(score, 0.8)
+    return round(min(score, 1.0), 3) if score else 0.15
 
 
 def _user_entity(
@@ -81,6 +253,61 @@ def _user_entity(
     }
 
 
+def compute_competitor_similarity(
+    *,
+    user: dict[str, Any],
+    competitor: dict[str, Any],
+    company: CompanyProfile,
+    region: str | None = None,
+) -> dict[str, float]:
+    """Compute per-competitor similarity across the six overview dimensions."""
+    ranker = CompetitorRanker()
+    base_score = ranker.score_candidate(company, competitor, region=region)
+
+    services = max(
+        float(base_score.get("services") or 0),
+        _services_similarity(user, competitor, company),
+    )
+    technology = max(
+        float(base_score.get("technology") or 0),
+        _technology_similarity(user, competitor, company),
+    )
+    marketing = max(
+        float(base_score.get("marketing") or 0),
+        _marketing_similarity(user, competitor, company=company),
+    )
+    content = max(
+        float(base_score.get("content") or base_score.get("content_strategy") or 0),
+        _content_similarity(user, competitor),
+    )
+    location = max(
+        float(base_score.get("location") or base_score.get("geography") or 0),
+        _location_similarity(user, competitor, company, region),
+    )
+    overall = round(
+        services * 0.25
+        + technology * 0.15
+        + marketing * 0.20
+        + content * 0.25
+        + location * 0.15,
+        3,
+    )
+    return {
+        "services": round(services, 3),
+        "technology": round(technology, 3),
+        "marketing": round(marketing, 3),
+        "content": round(content, 3),
+        "location": round(location, 3),
+        "overall": overall,
+        "target_audience": float(base_score.get("target_audience") or base_score.get("audience") or 0),
+        "industry": float(base_score.get("industry") or 0),
+        "pricing": max(
+            float(base_score.get("pricing") or 0),
+            _pricing_similarity(company, competitor),
+        ),
+    }
+
+
 def _normalize_similarity(score: dict[str, Any]) -> dict[str, float]:
     return {
         "services": float(score.get("products") or score.get("services") or 0),
@@ -118,13 +345,52 @@ def _content_similarity(user: dict[str, Any], competitor: dict[str, Any]) -> flo
         comp_themes.add(str(theme).lower())
     user_themes.discard("")
     comp_themes.discard("")
-    if not user_themes or not comp_themes:
-        return 0.0
-    overlap = user_themes & comp_themes
-    return round(min(len(overlap) / max(len(user_themes), 1), 1.0), 3)
+    theme_score = 0.0
+    if user_themes and comp_themes:
+        overlap = user_themes & comp_themes
+        theme_score = min(len(overlap) / max(len(user_themes), 1), 1.0)
+
+    user_hashtags = {
+        str(tag).lower().lstrip("#")
+        for tag in (user_ig.get("top_hashtags") or [])
+        if tag
+    }
+    comp_hashtags = {
+        str(tag).lower().lstrip("#")
+        for tag in (comp_ig.get("top_hashtags") or [])
+        if tag
+    }
+    hashtag_score = 0.0
+    if user_hashtags and comp_hashtags:
+        hashtag_score = len(user_hashtags & comp_hashtags) / max(len(user_hashtags), 1)
+
+    format_score = 0.0
+    user_format = user_ig.get("primary_format")
+    comp_format = comp_ig.get("primary_format")
+    if user_format and comp_format and str(user_format).lower() == str(comp_format).lower():
+        format_score = 0.45
+
+    category_score = 0.0
+    user_category = user_ig.get("primary_content_category")
+    comp_category = comp_ig.get("primary_content_category")
+    if user_category and comp_category and str(user_category).lower() == str(comp_category).lower():
+        category_score = 0.35
+
+    combined = max(
+        theme_score,
+        min(hashtag_score * 0.85 + format_score * 0.35 + category_score * 0.25, 1.0),
+    )
+    if combined == 0.0 and user_ig and comp_ig:
+        combined = 0.2
+    return round(min(combined, 1.0), 3)
 
 
-def _marketing_similarity(user: dict[str, Any], competitor: dict[str, Any]) -> float:
+def _marketing_similarity(
+    user: dict[str, Any],
+    competitor: dict[str, Any],
+    *,
+    company: CompanyProfile | None = None,
+) -> float:
     user_text = collect_text_blobs(user).lower()
     comp_text = collect_text_blobs(competitor).lower()
     marketing_terms = (
@@ -137,13 +403,45 @@ def _marketing_similarity(user: dict[str, Any], competitor: dict[str, Any]) -> f
         "lead generation",
         "b2b",
         "thought leadership",
+        "software development",
+        "consulting",
+        "technology services",
     )
     user_hits = sum(1 for term in marketing_terms if term in user_text)
     comp_hits = sum(1 for term in marketing_terms if term in comp_text)
-    if user_hits == 0 and comp_hits == 0:
-        return 0.0
     shared = sum(1 for term in marketing_terms if term in user_text and term in comp_text)
-    return round(shared / max(user_hits, comp_hits, 1), 3)
+    term_score = shared / max(user_hits, comp_hits, 1) if (user_hits or comp_hits) else 0.0
+
+    keyword_score = 0.0
+    if company:
+        keywords = [str(keyword).lower() for keyword in (company.keywords or [])[:12] if keyword]
+        if keywords:
+            keyword_hits = sum(1 for keyword in keywords if keyword in user_text and keyword in comp_text)
+            keyword_score = keyword_hits / max(len(keywords), 1)
+
+    user_channels = set()
+    comp_channels = set()
+    if user.get("instagram_analysis"):
+        user_channels.add("instagram")
+    if user.get("linkedin_analysis") or user.get("user_linkedin"):
+        user_channels.add("linkedin")
+    if competitor.get("instagram_analysis"):
+        comp_channels.add("instagram")
+    if competitor.get("linkedin_analysis"):
+        comp_channels.add("linkedin")
+    channel_score = 0.0
+    if user_channels and comp_channels:
+        channel_score = len(user_channels & comp_channels) / max(len(user_channels | comp_channels), 1)
+
+    user_li = user.get("linkedin_analysis") or {}
+    comp_li = competitor.get("linkedin_analysis") or {}
+    thought_score = 0.0
+    user_tl = float(user_li.get("thought_leadership_score") or 0)
+    comp_tl = float(comp_li.get("thought_leadership_score") or 0)
+    if user_tl and comp_tl:
+        thought_score = 1.0 - min(abs(user_tl - comp_tl), 1.0)
+
+    return round(min(max(term_score, keyword_score, channel_score * 0.65, thought_score * 0.5), 1.0), 3)
 
 
 def _pricing_similarity(company: CompanyProfile, competitor: dict[str, Any]) -> float:
@@ -199,7 +497,11 @@ def _competitor_gaps(
         intel = comp.get("website_intelligence") or {}
         for svc in intel.get("services") or []:
             comp_services[str(svc).lower()] += 1
+        for svc in _service_terms(comp):
+            comp_services[str(svc).lower()] += 1
         for tech in intel.get("technologies") or []:
+            comp_tech[str(tech).lower()] += 1
+        for tech in _technology_terms(comp):
             comp_tech[str(tech).lower()] += 1
         text = collect_text_blobs(comp)
         for sig in extract_business_signals(text)["active_signals"]:
@@ -251,7 +553,7 @@ def _competitor_gaps(
     merged_service_gaps = list(
         dict.fromkeys(
             [g["item"] for g in service_gaps]
-            + (gap_analysis.get("service_gaps") or [])
+            + ((gap_analysis or {}).get("service_gaps") or [])
         )
     )[:12]
 
@@ -373,38 +675,14 @@ def build_competitor_intelligence_report(
 ) -> dict[str, Any]:
     """Full user-vs-competitor report with similarity, gaps, signals, reviews, LinkedIn."""
     user = _user_entity(company, company_analysis=company_analysis, company_profile=company_profile)
-    ranker = CompetitorRanker()
 
     similarity_comparisons: list[dict[str, Any]] = []
     for comp in competitors:
-        base_score = ranker.score_candidate(company, comp, region=region)
-        normalized = _normalize_similarity(base_score)
-        normalized["content"] = max(
-            normalized["content"],
-            _content_similarity(user, comp),
-        )
-        normalized["marketing"] = max(
-            normalized["marketing"],
-            _marketing_similarity(user, comp),
-        )
-        normalized["pricing"] = max(
-            normalized["pricing"],
-            _pricing_similarity(company, comp),
-        )
-        normalized["services"] = max(
-            normalized["services"],
-            float(base_score.get("products") or 0),
-        )
-        normalized["overall"] = round(
-            normalized["services"] * 0.18
-            + normalized["technology"] * 0.12
-            + normalized["target_audience"] * 0.10
-            + normalized["industry"] * 0.12
-            + normalized["pricing"] * 0.08
-            + normalized["location"] * 0.12
-            + normalized["marketing"] * 0.10
-            + normalized["content"] * 0.18,
-            3,
+        normalized = compute_competitor_similarity(
+            user=user,
+            competitor=comp,
+            company=company,
+            region=region,
         )
         similarity_comparisons.append(
             {
@@ -412,6 +690,8 @@ def build_competitor_intelligence_report(
                 "username": comp.get("username"),
                 "website": comp.get("website"),
                 "similarity": normalized,
+                "similarity_percentages": similarity_to_percentages(normalized),
+                "match_score": normalized["overall"],
             }
         )
 
@@ -440,8 +720,10 @@ def build_competitor_intelligence_report(
             / max(len(similarity_comparisons), 1),
             3,
         )
-        for key in SIMILARITY_KEYS
+        for key in (*UI_SIMILARITY_KEYS, "target_audience", "industry", "pricing")
+        if any(key in item["similarity"] for item in similarity_comparisons)
     }
+    avg_similarity["similarity_percentages"] = similarity_to_percentages(avg_similarity)
 
     return {
         "user_company": {

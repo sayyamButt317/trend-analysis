@@ -1,6 +1,9 @@
 from __future__ import annotations
+
 from collections import Counter
 from typing import Any
+
+from service.Competitor.strategic_insights import build_strategic_insights
 
 
 def _swot_analysis(
@@ -396,6 +399,7 @@ def build_analysis_sections(
     content_mix: list[dict],
     market_insights: dict[str, Any],
     competitors: list[dict],
+    processed_posts: list[dict] | None = None,
 ) -> dict[str, Any]:
     """Build the canonical analysis object expected by the API consumer."""
     profile = company_profile or {}
@@ -405,6 +409,27 @@ def build_analysis_sections(
 
     user_ig_block = (social.get("user_instagram") or {})
     user_li_block = (social.get("user_linkedin") or {})
+
+    swot = _swot_analysis(
+        company_profile=profile,
+        company_analysis=company_analysis,
+        intel_report=intel,
+        gap_analysis=gaps_raw,
+        competitors=competitors,
+    )
+    strategic_insights = build_strategic_insights(
+        company=company,
+        company_profile=profile,
+        company_analysis=company_analysis,
+        competitors=competitors,
+        competitor_intelligence_report=intel,
+        gap_analysis=gaps_raw,
+        search_intelligence=search_intelligence,
+        processed_posts=processed_posts or [],
+        content_mix=content_mix,
+        market_insights=market_insights,
+        swot=swot,
+    )
 
     return {
         "user_profile": _user_profile_section(
@@ -478,13 +503,8 @@ def build_analysis_sections(
             gap_analysis=gaps_raw,
             competitors=competitors,
         ),
-        "swot": _swot_analysis(
-            company_profile=profile,
-            company_analysis=company_analysis,
-            intel_report=intel,
-            gap_analysis=gaps_raw,
-            competitors=competitors,
-        ),
+        "swot": swot,
+        "strategic_insights": strategic_insights,
         "similarity": {
             "average": intel.get("average_similarity") or {},
             "vs_competitors": intel.get("similarity_vs_competitors") or similarity_scores or [],
