@@ -19,7 +19,6 @@ def configure_windows_event_loop() -> None:
 
 
 def playwright_subprocess_supported() -> bool:
-    """Return False when the active loop cannot spawn subprocesses (Playwright on Windows)."""
     if sys.platform != "win32":
         return True
     try:
@@ -32,7 +31,6 @@ def playwright_subprocess_supported() -> bool:
     loop_name = type(loop).__name__
     if "Selector" in loop_name:
         return False
-    # Inside FastAPI/uvicorn on Windows, prefer the thread runner even with Proactor.
     return False
 
 
@@ -49,7 +47,6 @@ async def run_async_playwright_in_thread(
     coro_factory: Callable[[], Awaitable[T]],
 ) -> T:
     parent_stats = get_api_call_stats()
-
     def _runner() -> T:
         bind_stats_to_thread(parent_stats)
         configure_windows_event_loop()
@@ -78,8 +75,6 @@ async def run_async_playwright_in_thread(
 
 
 class BrowserManager:
-    """Async context manager for Playwright browser lifecycle."""
-    
     def __init__(
         self,
         headless: bool = True,
@@ -88,16 +83,6 @@ class BrowserManager:
         user_agent: Optional[str] = None,
         **launch_options: Any
     ):
-        """
-        Initialize browser manager.
-        
-        Args:
-            headless: Run browser in headless mode
-            slow_mo: Slow down operations by specified milliseconds
-            viewport: Browser viewport size (default: 1280x720)
-            user_agent: Custom user agent string
-            **launch_options: Additional Playwright launch options
-        """
         self.headless = headless
         self.slow_mo = slow_mo
         self.viewport = viewport or {"width": 1280, "height": 720}
@@ -111,20 +96,15 @@ class BrowserManager:
         self._is_authenticated = False
     
     async def __aenter__(self) -> "BrowserManager":
-        """Start browser and create context."""
         await self.start()
         return self
     
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Close browser and cleanup."""
         await self.close()
     
     async def start(self) -> None:
-        """Start Playwright and launch browser."""
         try:
             self._playwright = await async_playwright().start()
-            
-            # Launch browser
             self._browser = await self._playwright.chromium.launch(
                 headless=self.headless,
                 slow_mo=self.slow_mo,
@@ -132,28 +112,19 @@ class BrowserManager:
             )
             
             logger.info(f"Browser launched (headless={self.headless})")
-            
-            # Create context
             context_options: Dict[str, Any] = {
                 "viewport": self.viewport,
             }
-            
             if self.user_agent:
                 context_options["user_agent"] = self.user_agent
-            
             self._context = await self._browser.new_context(**context_options)
-            
-            # Create initial page
             self._page = await self._context.new_page()
-            
             logger.info("Browser context and page created")
-            
         except Exception as e:
             await self.close()
             raise NetworkError(f"Failed to start browser: {e}")
     
     async def close(self) -> None:
-        """Close browser and cleanup resources."""
         page = self._page
         context = self._context
         browser = self._browser
@@ -175,12 +146,6 @@ class BrowserManager:
         logger.info("Browser closed")
     
     async def new_page(self) -> Page:
-        """
-        Create a new page in the current context.
-        
-        Returns:
-            New Playwright page
-        """
         if not self._context:
             raise RuntimeError("Browser context not initialized. Call start() first.")
         
@@ -189,71 +154,35 @@ class BrowserManager:
     
     @property
     def page(self) -> Page:
-        """
-        Get the main page.
-        
-        Returns:
-            Main Playwright page
-        """
         if not self._page:
             raise RuntimeError("Browser not started. Use async context manager or call start().")
         return self._page
     
     @property
     def context(self) -> BrowserContext:
-        """
-        Get the browser context.
-        
-        Returns:
-            Playwright browser context
-        """
         if not self._context:
             raise RuntimeError("Browser context not initialized.")
         return self._context
     
     @property
     def browser(self) -> Browser:
-        """
-        Get the browser instance.
-        
-        Returns:
-            Playwright browser
-        """
         if not self._browser:
             raise RuntimeError("Browser not started.")
         return self._browser
     
     async def save_session(self, filepath: str) -> None:
-        """
-        Save browser session (cookies and storage) to file.
-        
-        Args:
-            filepath: Path to save session file
-        """
         if not self._context:
             raise RuntimeError("No browser context to save")
-        
         storage_state = await self._context.storage_state()
-        
         path = Path(filepath)
         path.parent.mkdir(parents=True, exist_ok=True)
-        
         with open(filepath, 'w') as f:
             json.dump(storage_state, f, indent=2)
-        
         logger.info(f"Session saved to {filepath}")
     
     async def load_session(self, filepath: str) -> None:
-        """
-        Load browser session from file.
-        
-        Args:
-            filepath: Path to session file
-        """
         if not Path(filepath).exists():
             raise FileNotFoundError(f"Session file not found: {filepath}")
-        
-        # Close existing context and create new one with stored state
         if self._context:
             await self._context.close()
         
@@ -265,25 +194,13 @@ class BrowserManager:
             viewport=self.viewport,
             user_agent=self.user_agent
         )
-        
-        # Create new page
         if self._page:
             await self._page.close()
         self._page = await self._context.new_page()
-        
         self._is_authenticated = True
-        
         logger.info(f"Session loaded from {filepath}")
     
     async def set_cookie(self, name: str, value: str, domain: str = ".linkedin.com") -> None:
-        """
-        Set a single cookie.
-        
-        Args:
-            name: Cookie name
-            value: Cookie value
-            domain: Cookie domain
-        """
         if not self._context:
             raise RuntimeError("No browser context")
         
@@ -298,10 +215,8 @@ class BrowserManager:
     
     @property
     def is_authenticated(self) -> bool:
-        """Check if user is authenticated."""
         return self._is_authenticated
     
     @is_authenticated.setter
     def is_authenticated(self, value: bool) -> None:
-        """Set authentication status."""
         self._is_authenticated = value

@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from typing import Any
-
 from config.credential_config import config, resolve_supabase_api_key
 from db.connection import get_supabase
 
@@ -83,7 +82,6 @@ def _insert_trend_sync(state: dict[str, Any]) -> str:
 
 
 async def save_trend_run(state: dict[str, Any]) -> dict[str, str | None]:
-    """Persist trend discovery results to Supabase."""
     if not _is_storage_configured():
         message = (
             "Supabase storage skipped: use SUPABASE_SERVICE_ROLE_KEY (JWT) from "

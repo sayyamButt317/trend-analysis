@@ -1,5 +1,4 @@
 import logging
-
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from models.company import CompanyProfile
@@ -15,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 async def competitor_intelligence_node(state: CompetitorState) -> CompetitorState:
-    """Build full user-vs-competitor intelligence report."""
     if state.get("error"):
         return state
 

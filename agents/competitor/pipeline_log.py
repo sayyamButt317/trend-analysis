@@ -1,7 +1,4 @@
-"""Structured logging for the competitor analysis pipeline."""
-
-from __future__ import annotations
-
+from __future__ import annotations  
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -11,9 +8,9 @@ logger = logging.getLogger("competitor.pipeline")
 
 T = TypeVar("T")
 
-# Ordered steps: (node_name, phase_id, human label)
 PIPELINE_ORDER: list[tuple[str, str, str]] = [
-    # Phase 1 — user profile
+    # Phase 1 — user profile (skipped when analyze-company handoff is provided)
+    ("hydrate_company_context", "1_user_profile", "Hydrate company summary or prepare analysis"),
     ("understand_company", "1_user_profile", "Understand company & crawl website"),
     ("analyze_user_instagram", "1_user_profile", "Analyze user Instagram"),
     ("analyze_user_linkedin", "1_user_profile", "Analyze user LinkedIn"),

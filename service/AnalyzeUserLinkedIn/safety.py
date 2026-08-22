@@ -10,8 +10,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-USER_EMPLOYEE_LIMIT = int(os.getenv("LINKEDIN_USER_EMPLOYEE_LIMIT") or 100)
-COMPETITOR_EMPLOYEE_LIMIT = int(os.getenv("LINKEDIN_COMPETITOR_EMPLOYEE_LIMIT") or 20)
+# Max 3 C-level / founding profiles per company.
+USER_EMPLOYEE_LIMIT = int(os.getenv("LINKEDIN_USER_EMPLOYEE_LIMIT") or 3)
+COMPETITOR_EMPLOYEE_LIMIT = int(os.getenv("LINKEDIN_COMPETITOR_EMPLOYEE_LIMIT") or 3)
 
 
 def linkedin_safety_config(runtime: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -61,6 +62,6 @@ def clamp_playwright_limits(
     cfg = safety or linkedin_safety_config()
     return (
         min(post_limit, cfg["max_posts_playwright"]),
-        min(employee_limit, cfg["max_employees_playwright"]),
+        min(employee_limit, cfg["max_employees_playwright"], 3),
         min(job_limit, cfg["max_jobs_playwright"]),
     )

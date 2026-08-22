@@ -17,6 +17,10 @@ from agents.competitor.node.FindCompetitor import FindCompetitorNode
 from agents.competitor.node.CompetitorIntelligenceNode import CompetitorIntelligenceNode
 from agents.competitor.node.GapAnalysisNode import GapAnalysisNode
 from agents.competitor.node.GenerateCompetitorSummary import GenerateCompetitorSummaryNode
+from agents.competitor.node.HydrateCompanyContext import (
+    HydrateCompanyContextNode,
+    route_after_hydrate,
+)
 from agents.competitor.node.ProposeCompetitorsNode import ProposeCompetitorsNode
 from agents.competitor.node.RecommendationNode import RecommendationNode
 from agents.competitor.node.SearchIntelligence import SearchIntelligenceNode
@@ -28,7 +32,8 @@ from agents.trend.state.trend_state import TrendState
 
 competitor_graph = StateGraph(TrendState)
 
-# Phase 1: user business DNA
+# Phase 0/1: reuse analyze-company handoff when provided; otherwise analyze company in-pipeline
+competitor_graph.add_node("hydrate_company_context", with_pipeline_log("hydrate_company_context", HydrateCompanyContextNode))
 competitor_graph.add_node("understand_company", with_pipeline_log("understand_company", UnderstandCompanyNode))
 competitor_graph.add_node("analyze_user_instagram", with_pipeline_log("analyze_user_instagram", AnalyzeUserInstaNode))
 competitor_graph.add_node("analyze_user_linkedin", with_pipeline_log("analyze_user_linkedin", AnalyzeUserLinkedInNode))
@@ -58,7 +63,15 @@ competitor_graph.add_node("competitor_intelligence", with_pipeline_log("competit
 competitor_graph.add_node("recommendations", with_pipeline_log("recommendations", RecommendationNode))
 competitor_graph.add_node("generate_competitor_summary", with_pipeline_log("generate_competitor_summary", GenerateCompetitorSummaryNode))
 
-competitor_graph.add_edge(START, "understand_company")
+competitor_graph.add_edge(START, "hydrate_company_context")
+competitor_graph.add_conditional_edges(
+    "hydrate_company_context",
+    route_after_hydrate,
+    {
+        "propose_competitors": "propose_competitors",
+        "understand_company": "understand_company",
+    },
+)
 competitor_graph.add_edge("understand_company", "analyze_user_instagram")
 competitor_graph.add_edge("analyze_user_instagram", "analyze_user_linkedin")
 competitor_graph.add_edge("analyze_user_linkedin", "propose_competitors")

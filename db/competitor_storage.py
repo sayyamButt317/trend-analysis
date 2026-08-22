@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from typing import Any
-
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
 from config.credential_config import config, resolve_supabase_api_key
 from db.connection import get_supabase
@@ -20,7 +19,7 @@ def _prompts_table() -> str:
 
 
 def _analysis_table() -> str:
-    return (config.SUPABASE_TABLE_ANALYSIS or "analysis").strip()
+    return (config.SUPABASE_TABLE_COMPETITORSANALYSIS or "competitorsanalysis").strip()
 
 
 def _insert_prompt_sync(request: CompetitorAnalysisRequest) -> str:
@@ -46,6 +45,8 @@ def _insert_analysis_sync(
     prompt_id: str,
     result: dict[str, Any],
     duration_sec: float,
+    company_name: str | None = None,
+    region: str | None = None,
 ) -> str:
     client = get_supabase()
     meta = result.get("meta") or {}
@@ -60,12 +61,17 @@ def _insert_analysis_sync(
         "competitor_count": int(result.get("competitor_count") or 0),
         "post_count": int(result.get("post_count") or 0),
         "duration_sec": round(duration_sec, 3),
-        "platform": meta.get("platform"),
+        "platform": meta.get("platform") or "competitor",
+        "company_name": company_name,
+        "region": region,
     }
     response = client.table(_analysis_table()).insert(row).execute()
     data = response.data or []
     if not data:
-        raise RuntimeError("Supabase returned no analysis row after insert")
+        raise RuntimeError(
+            f"Supabase returned no row after insert into {_analysis_table()}. "
+            "Create the table with db/migrations/004_competitorsanalysis.sql"
+        )
     return str(data[0]["id"])
 
 
@@ -75,7 +81,6 @@ async def save_competitor_run(
     *,
     duration_sec: float,
 ) -> dict[str, str | None]:
-    """Persist user input to prompts and API result to analysis."""
     if not _is_storage_configured():
         message = (
             "Supabase storage skipped: use SUPABASE_SERVICE_ROLE_KEY (JWT) from "
@@ -89,24 +94,35 @@ async def save_competitor_run(
 
     try:
         prompt_id = await asyncio.to_thread(_insert_prompt_sync, request)
+        company = request.normalized_company()
         analysis_id = await asyncio.to_thread(
             _insert_analysis_sync,
             prompt_id=prompt_id,
             result=result,
             duration_sec=duration_sec,
+            company_name=company.get("name") or request.company_name,
+            region=request.region,
         )
         logger.info(
-            "Saved competitor run prompt_id=%s analysis_id=%s",
+            "Saved competitor run prompt_id=%s analysis_id=%s table=%s",
             prompt_id,
             analysis_id,
+            _analysis_table(),
         )
         return {"prompt_id": prompt_id, "analysis_id": analysis_id, "storage_error": None}
     except Exception as exc:
         logger.exception("Failed to save competitor run to Supabase")
+        message = str(exc)
+        if "competitorsanalysis" in message.lower() or "PGRST205" in message or "does not exist" in message.lower():
+            message = (
+                f"{message} — Create the table in Supabase SQL Editor using "
+                "db/migrations/004_competitorsanalysis.sql "
+                f"(table name from SUPABASE_TABLE_COMPETITORSANALYSIS={_analysis_table()})"
+            )
         return {
             "prompt_id": None,
             "analysis_id": None,
-            "storage_error": str(exc),
+            "storage_error": message,
         }
 
 
@@ -115,7 +131,6 @@ def _reports_table() -> str:
 
 
 def _delete_analysis_sync(analysis_id: str) -> dict[str, Any]:
-    """Delete analysis row, related reports, and orphaned prompt."""
     client = get_supabase()
     analysis_table = _analysis_table()
     prompts_table = _prompts_table()
@@ -160,7 +175,6 @@ def _delete_analysis_sync(analysis_id: str) -> dict[str, Any]:
         .execute()
     )
     if not (analysis_resp.data or []):
-        # Some Supabase configs return empty data on delete; verify gone.
         check = (
             client.table(analysis_table)
             .select("id")
@@ -199,7 +213,6 @@ def _delete_analysis_sync(analysis_id: str) -> dict[str, Any]:
 
 
 async def delete_competitor_analysis(analysis_id: str) -> dict[str, Any]:
-    """Delete a stored competitor analysis result and related DB rows."""
     if not _is_storage_configured():
         raise RuntimeError("Supabase is not configured")
 

@@ -13,7 +13,7 @@ AGENT_TYPE = "competitor"
 
 
 def _analysis_table() -> str:
-    return (config.SUPABASE_TABLE_ANALYSIS or "analysis").strip()
+    return (config.SUPABASE_TABLE_COMPETITORSANALYSIS or "competitorsanalysis").strip()
 
 
 def _prompts_table() -> str:

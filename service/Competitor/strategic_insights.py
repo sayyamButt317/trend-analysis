@@ -6,6 +6,7 @@ from typing import Any
 
 from agents.trend.Nodes.common import parse_timestamp
 from service.Competitor.competitor_intelligence_report import _service_terms, _technology_terms
+from service.Competitor.customer_insights import build_customer_insights
 from service.Competitor.signal_extractor import (
     collect_text_blobs,
     extract_business_signals,
@@ -862,6 +863,19 @@ def build_strategic_insights(
         content_score=content_score,
     )
 
+
+    customer_insights = build_customer_insights(
+        company=company,
+        company_profile=profile,
+        company_analysis=company_analysis,
+        competitors=competitors,
+        competitor_intelligence_report=intel,
+        gap_analysis=gaps_raw,
+        content_mix=content_mix,
+        market_position=market_position,
+        region=company.get("region") or profile.get("region"),
+    )
+
     return {
         "missing_services": missing_services,
         "technology_gap": technology_gap,
@@ -875,4 +889,5 @@ def build_strategic_insights(
         "opportunities": opportunities,
         "threats": threats,
         "executive_summary": executive_summary,
+        "customer_insights": customer_insights,
     }

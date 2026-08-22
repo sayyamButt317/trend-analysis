@@ -342,6 +342,7 @@ def build_competitor_response(
         "competitors": competitor_profiles,
         "analysis": analysis,
         "strategic_insights": analysis.get("strategic_insights") or {},
+        "customer_insights": (analysis.get("strategic_insights") or {}).get("customer_insights") or {},
         "market_insights": market_insights,
         "meta": meta,
         "company_profile": company_profile or {},

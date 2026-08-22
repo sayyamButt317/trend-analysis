@@ -23,9 +23,10 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
     "/analyze",
     summary="Analyze competitors (sync — may 504 behind proxies)",
     description=(
-        "Runs the full competitor agent and waits for completion. "
-        "Long runs (3–10+ minutes) often hit gateway 504 timeouts. "
-        "Prefer POST /competitor-analysis/analyze/async from the frontend."
+        "Runs the competitor agent. Prefer passing `company`, `summary_text`, and "
+        "`company_analysis` from POST /analyze-company/analyze so your website/"
+        "Instagram/LinkedIn are not re-analyzed every run. Long runs often hit "
+        "gateway 504 — prefer async."
     ),
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):

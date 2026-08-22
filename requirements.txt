@@ -26,3 +26,6 @@ psycopg2-binary==2.9.10
 playwright>=1.40.0
 lxml>=5.0.0
 aiofiles>=23.0.0
+
+# Video generation
+higgsfield-client>=0.1.0

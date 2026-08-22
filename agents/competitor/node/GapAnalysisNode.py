@@ -6,6 +6,7 @@ from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from models.company import CompanyProfile
 from service.Competitor.competitor_ranker import CompetitorRanker
+from service.Competitor.gap_filters import clean_gap_terms
 
 logger = logging.getLogger(__name__)
 
@@ -29,9 +30,13 @@ def _content_gaps(
         for row in profile.get("media_types") or []:
             market_formats[row.get("type") or "Unknown"] += int(row.get("count") or 0)
         for row in profile.get("content_themes") or []:
-            market_themes[row.get("theme") or "General"] += int(row.get("count") or 0)
+            theme = row.get("theme") or "General"
+            if theme and theme.lower() not in {"general", "#", "##"}:
+                market_themes[theme] += int(row.get("count") or 0)
         for row in profile.get("content_categories") or []:
-            market_categories[row.get("category") or "General"] += int(row.get("count") or 0)
+            category = row.get("category") or "General"
+            if category and category.lower() not in {"general", "#", "##"}:
+                market_categories[category] += int(row.get("count") or 0)
 
     competitor_services: set[str] = set()
     competitor_technologies: set[str] = set()
@@ -46,10 +51,10 @@ def _content_gaps(
             competitor_technologies.add(str(tech).lower())
 
     company_services = {s.lower() for s in company.services if s}
-    service_gaps = sorted(competitor_services - company_services)[:12]
+    service_gaps = clean_gap_terms(sorted(competitor_services - company_services), limit=12)
 
     company_tech = {t.lower() for t in company.technologies if t}
-    technology_gaps = sorted(competitor_technologies - company_tech)[:10]
+    technology_gaps = clean_gap_terms(sorted(competitor_technologies - company_tech), limit=10)
 
     return {
         "dominant_competitor_formats": [
@@ -87,25 +92,25 @@ async def gap_analysis_node(state: CompetitorState) -> CompetitorState:
     base_gaps = ranker.gap_analysis(company, competitors)
     content_gaps = _content_gaps(company, content_mix=content_mix, competitors=competitors)
 
-    merged_services = list(
-        dict.fromkeys(
-            [
-                *(content_gaps.get("service_gaps") or []),
-                *(base_gaps.get("service_gaps") or []),
-            ]
-        )
-    )[:12]
+    merged_services = clean_gap_terms(
+        [
+            *(content_gaps.get("service_gaps") or []),
+            *(base_gaps.get("service_gaps") or []),
+        ],
+        limit=12,
+    )
 
     gaps = {
         **base_gaps,
         **content_gaps,
         "service_gaps": merged_services,
-        "keyword_gaps": base_gaps.get("keyword_gaps") or [],
+        "keyword_gaps": clean_gap_terms(base_gaps.get("keyword_gaps") or [], limit=10),
+        "technology_gaps": clean_gap_terms(content_gaps.get("technology_gaps") or [], limit=10),
         "competitor_count": len(competitors),
         "content_profiles_analyzed": len(content_mix),
         "websites_analyzed": len(state.get("competitor_website_intel") or []),
         "summary": (
-            f"Found {len(merged_services)} service gaps, "
+            f"Found {len(merged_services)} meaningful service gaps, "
             f"{len(content_gaps.get('technology_gaps') or [])} technology gaps, and "
             f"{len(content_gaps.get('dominant_competitor_themes') or [])} dominant competitor themes "
             f"across {len(competitors)} competitors."

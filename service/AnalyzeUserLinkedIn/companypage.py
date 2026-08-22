@@ -58,12 +58,14 @@ async def run_playwright_session(
             if li_session.is_blocked:
                 return {"posts": posts, "employees": [], "jobs": [], "company_size": None}
 
-            employees = await scrape_employees_from_page(
-                li_session,
-                company_name=company_name,
-                linkedin_url=linkedin_url,
-                limit=employee_limit,
-            )
+            employees: list[dict[str, Any]] = []
+            if employee_limit > 0:
+                employees = await scrape_employees_from_page(
+                    li_session,
+                    company_name=company_name,
+                    linkedin_url=linkedin_url,
+                    limit=employee_limit,
+                )
             jobs = await scrape_jobs_from_page(
                 li_session,
                 company_name=company_name,

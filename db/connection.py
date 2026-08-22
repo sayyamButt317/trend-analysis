@@ -1,9 +1,7 @@
 import re
 from functools import lru_cache
-
 from fastapi import Depends
 from supabase import Client, create_client
-
 from config.credential_config import config, resolve_supabase_api_key
 
 

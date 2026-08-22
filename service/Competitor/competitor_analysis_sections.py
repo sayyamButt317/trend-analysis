@@ -1,9 +1,8 @@
 from __future__ import annotations
-
 from collections import Counter
 from typing import Any
-
 from service.Competitor.strategic_insights import build_strategic_insights
+from service.Competitor.gap_filters import clean_gap_terms, is_meaningful_gap_term
 
 
 def _swot_analysis(
@@ -36,12 +35,16 @@ def _swot_analysis(
         strengths.append(f"Instagram engagement rate: {user_ig['avg_engagement_rate']}%")
 
     weaknesses: list[str] = []
-    for svc in (gaps.get("services") or [])[:4]:
+    for svc in clean_gap_terms(gaps.get("services") or [], limit=4):
         weaknesses.append(f"Missing service/theme: {svc}")
-    for tech in (gaps.get("technologies") or gap_analysis.get("technology_gaps") or [])[:4]:
+    for tech in clean_gap_terms(
+        gaps.get("technologies") or gap_analysis.get("technology_gaps") or [],
+        limit=4,
+    ):
         weaknesses.append(f"Missing technology focus: {tech}")
     for sig in competitor_only[:4]:
-        weaknesses.append(f"Competitors promote {sig.replace('_', ' ')} — you don't")
+        if is_meaningful_gap_term(sig):
+            weaknesses.append(f"Competitors promote {str(sig).replace('_', ' ')} — you don't")
 
     opportunities: list[str] = []
     for gap in (intel_report.get("review_intelligence") or {}).get("gaps") or []:
@@ -241,50 +244,66 @@ def _flatten_gaps(
     items: list[dict[str, Any]] = []
     intel_gaps = intel_report.get("gaps") or {}
 
-    for svc in intel_gaps.get("services") or gap_analysis.get("service_gaps") or []:
-        label = svc if isinstance(svc, str) else svc.get("item", svc)
-        items.append({"type": "service", "item": label, "priority": "high"})
+    for svc in clean_gap_terms(
+        intel_gaps.get("services") or gap_analysis.get("service_gaps"),
+        limit=12,
+    ):
+        items.append({"type": "service", "item": svc, "priority": "high"})
 
-    for tech in intel_gaps.get("technologies") or gap_analysis.get("technology_gaps") or []:
-        label = tech if isinstance(tech, str) else tech.get("item", tech)
-        items.append({"type": "technology", "item": label, "priority": "medium"})
+    for tech in clean_gap_terms(
+        intel_gaps.get("technologies") or gap_analysis.get("technology_gaps"),
+        limit=10,
+    ):
+        items.append({"type": "technology", "item": tech, "priority": "medium"})
 
     for row in intel_gaps.get("business_signals") or []:
+        signal = row.get("signal") if isinstance(row, dict) else row
+        if not is_meaningful_gap_term(signal):
+            continue
         items.append(
             {
                 "type": "business_signal",
-                "item": row.get("signal"),
-                "competitor_count": row.get("competitor_count"),
+                "item": signal,
+                "competitor_count": (row.get("competitor_count") if isinstance(row, dict) else None),
                 "priority": "medium",
             }
         )
 
     for row in intel_gaps.get("content_types") or []:
+        label = row.get("content_type") if isinstance(row, dict) else row
+        if not is_meaningful_gap_term(label):
+            continue
         items.append(
             {
                 "type": "content",
-                "item": row.get("content_type"),
-                "competitor_count": row.get("competitor_count"),
+                "item": label,
+                "competitor_count": (row.get("competitor_count") if isinstance(row, dict) else None),
                 "priority": "medium",
             }
         )
 
     for row in intel_gaps.get("review_platforms") or []:
+        label = row.get("platform") if isinstance(row, dict) else row
+        if not is_meaningful_gap_term(label):
+            continue
         items.append(
             {
                 "type": "review",
-                "item": row.get("platform"),
-                "competitor_count": row.get("competitor_count"),
+                "item": label,
+                "competitor_count": (row.get("competitor_count") if isinstance(row, dict) else None),
                 "priority": "high",
             }
         )
 
     for theme in gap_analysis.get("dominant_competitor_themes") or []:
+        label = theme.get("theme") if isinstance(theme, dict) else theme
+        if not is_meaningful_gap_term(label):
+            continue
         items.append(
             {
                 "type": "theme",
-                "item": theme.get("theme"),
-                "competitor_count": theme.get("count"),
+                "item": label,
+                "competitor_count": (theme.get("count") if isinstance(theme, dict) else None),
                 "priority": "medium",
             }
         )
@@ -510,5 +529,6 @@ def build_analysis_sections(
             "vs_competitors": intel.get("similarity_vs_competitors") or similarity_scores or [],
         },
         "gaps": _flatten_gaps(gap_analysis=gaps_raw, intel_report=intel),
+        "customer_insights": strategic_insights.get("customer_insights") or {},
         "recommendations": recommendations or [],
     }

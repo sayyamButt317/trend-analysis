@@ -1,10 +1,6 @@
-"""Shared filters to reject listicles / directories — industry-agnostic for multi-tenant SaaS."""
-
 from __future__ import annotations
-
 import re
 
-# Title patterns that almost never are a real company name (any industry).
 _LISTICLE_NAME_RE = re.compile(
     r"("
     r"\btop\s+\d*"
@@ -28,7 +24,6 @@ _LISTICLE_NAME_RE = re.compile(
     re.I,
 )
 
-# Directory / aggregator brands only — never hard-block real companies by industry.
 _BLOCKED_NAME_TOKENS = (
     "companies in",
     "dominating",
@@ -62,7 +57,6 @@ _BLOCKED_HOST_OR_PATH = (
 
 
 def is_blocked_competitor_name(name: str | None) -> bool:
-    """True if the name looks like a listicle or directory, not a real company."""
     text = (name or "").strip()
     if len(text) < 2:
         return True
@@ -71,7 +65,6 @@ def is_blocked_competitor_name(name: str | None) -> bool:
         return True
     if _LISTICLE_NAME_RE.search(text):
         return True
-    # Real company names are rarely this long and full of year/marketing fluff.
     if len(text) > 80 and any(ch.isdigit() for ch in text):
         return True
     return False
@@ -85,7 +78,6 @@ def is_blocked_competitor_url(url: str | None) -> bool:
 
 
 def is_junk_competitor(item: dict) -> bool:
-    """Reject listicle / directory candidates before they enter the pipeline."""
     name = item.get("name") or item.get("title") or ""
     if is_blocked_competitor_name(str(name)):
         return True

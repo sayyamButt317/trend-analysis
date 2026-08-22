@@ -88,7 +88,7 @@ async def analyze_competitor_linkedin(
         urls = build_company_urls_from_name(name, linkedin_url=linkedin_url)
         warnings.append(f"Could not fetch LinkedIn posts from {urls['posts_url']}.")
     if not employees:
-        warnings.append(f"No LinkedIn employees found for {name} (target {employee_limit}).")
+        warnings.append(f"No C-level LinkedIn profiles found for {name} (target {employee_limit}).")
 
     analysis = build_linkedin_analysis(
         posts,

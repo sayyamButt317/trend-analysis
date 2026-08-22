@@ -22,8 +22,14 @@ def invalidate_linkedin_session_cache(session_file: str | None = None) -> None:
 
 
 class LinkedInPlaywrightSession:
-    def __init__(self, *, runtime: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        runtime: dict[str, Any] | None = None,
+        headless: bool = True,
+    ) -> None:
         self.safety = linkedin_safety_config(runtime)
+        self.headless = headless
         self._browser: BrowserManager | None = None
         self._pages_visited = 0
         self._blocked = False
@@ -47,7 +53,7 @@ class LinkedInPlaywrightSession:
 
     async def start(self) -> None:
         self._browser = BrowserManager(
-            headless=True,
+            headless=self.headless,
             slow_mo=self.safety["slow_mo_ms"],
         )
         try:

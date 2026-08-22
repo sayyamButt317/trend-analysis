@@ -1,7 +1,6 @@
 from __future__ import annotations
 from collections import Counter
 from typing import Any
-
 from models.company import CompanyProfile
 from service.Competitor.competitor_ranker import CompetitorRanker, _region_terms, _text_hits
 from service.Competitor.signal_extractor import (
@@ -52,7 +51,6 @@ UI_SIMILARITY_KEYS = (
 
 
 def similarity_to_percentages(similarity: dict[str, Any]) -> dict[str, int]:
-    """Map 0-1 similarity scores to 0-100 percentages for the overview table."""
     return {
         "overall": round(float(similarity.get("overall") or 0) * 100),
         "services": round(float(similarity.get("services") or 0) * 100),
@@ -260,7 +258,6 @@ def compute_competitor_similarity(
     company: CompanyProfile,
     region: str | None = None,
 ) -> dict[str, float]:
-    """Compute per-competitor similarity across the six overview dimensions."""
     ranker = CompetitorRanker()
     base_score = ranker.score_candidate(company, competitor, region=region)
 
@@ -673,7 +670,6 @@ def build_competitor_intelligence_report(
     gap_analysis: dict[str, Any] | None = None,
     region: str | None = None,
 ) -> dict[str, Any]:
-    """Full user-vs-competitor report with similarity, gaps, signals, reviews, LinkedIn."""
     user = _user_entity(company, company_analysis=company_analysis, company_profile=company_profile)
 
     similarity_comparisons: list[dict[str, Any]] = []

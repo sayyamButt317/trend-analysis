@@ -1,22 +1,19 @@
-"""Propose authentic competitors via OpenAI after user Instagram + LinkedIn DNA."""
-
 from __future__ import annotations
-
 import logging
 from typing import Any
-
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.services.company_social_analyzer import resolve_company_social_handles
 from agents.competitor.node.discovery_utils import has_manual_competitors, manual_competitor_inputs
 from agents.trend.services.manual_competitors import resolve_manual_competitors
-from service.Competitor.competitor_proposer import MIN_COMPETITORS, CompetitorProposerService
+from service.Competitor.CompetitorProposerService import CompetitorProposerService
+from service.Competitor.competitor_proposer import MIN_COMPETITORS
+
 
 logger = logging.getLogger(__name__)
 
 
 def _manual_inputs(config: dict[str, Any], filters: dict[str, Any]) -> list[str]:
-    # Prefer nested filters, then top-level (to_agent_config spreads filters).
     return manual_competitor_inputs({**config, "filters": filters})
 
 
@@ -27,7 +24,6 @@ async def _fill_missing_socials(
     resolve_linkedin: bool,
     max_lookups: int = 10,
 ) -> list[dict[str, Any]]:
-    """Light Tavily fill only when OpenAI/manual left Instagram/LinkedIn blank."""
     filled: list[dict[str, Any]] = []
     lookups = 0
     for item in competitors:

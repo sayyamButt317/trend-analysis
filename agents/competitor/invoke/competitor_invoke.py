@@ -3,7 +3,6 @@ import logging
 import time
 from datetime import datetime, timezone
 from typing import Any
-
 from agents.competitor.graph.competitor_graph import competitor_graph_app
 from agents.competitor.pipeline_log import log_event, log_pipeline_complete, log_pipeline_start
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest
@@ -61,6 +60,7 @@ async def competitorAnalysisAgent(
         competitor_limit=agent_config.get("competitor_limit"),
         post_limit=agent_config.get("post_limit"),
         skip_linkedin=bool(agent_config.get("skip_linkedin")),
+        skip_company_analysis=bool(agent_config.get("skip_company_analysis")),
         manual_competitors=len(filters_applied.get("competitors") or agent_config.get("competitors") or []),
     )
 

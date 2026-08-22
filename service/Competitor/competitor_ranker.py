@@ -2,6 +2,7 @@ import logging
 from typing import Any
 
 from models.company import CompanyProfile
+from service.Competitor.gap_filters import clean_gap_terms
 from service.Competitor.signal_extractor import collect_text_blobs, extract_technologies_mentioned
 
 logger = logging.getLogger(__name__)
@@ -224,15 +225,27 @@ class CompetitorRanker:
         company: CompanyProfile,
         competitors: list[dict[str, Any]],
     ) -> dict[str, Any]:
+
+
         competitor_services = set()
         competitor_keywords = set()
         for comp in competitors:
-            competitor_services.update((comp.get("description") or "").lower().split())
-            competitor_keywords.update((comp.get("source_query") or "").lower().split())
+            for svc in comp.get("website_services") or []:
+                if svc:
+                    competitor_services.add(str(svc).lower().strip())
+            intel = comp.get("website_intelligence") or {}
+            for svc in intel.get("services") or []:
+                competitor_services.add(str(svc).lower().strip())
+            for term in (comp.get("description") or "").lower().replace("/", " ").split():
+                if len(term) >= 4:
+                    competitor_keywords.add(term)
 
         company_services = {s.lower() for s in company.services}
-        service_gaps = sorted(competitor_services - company_services)[:10]
-        keyword_gaps = sorted(competitor_keywords - {k.lower() for k in company.keywords})[:10]
+        service_gaps = clean_gap_terms(sorted(competitor_services - company_services), limit=10)
+        keyword_gaps = clean_gap_terms(
+            sorted(competitor_keywords - {k.lower() for k in company.keywords}),
+            limit=10,
+        )
 
         return {
             "service_gaps": service_gaps,
@@ -251,13 +264,18 @@ class CompetitorRanker:
         competitors: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         recs: list[dict[str, Any]] = []
-        if gap_analysis.get("service_gaps"):
+        service_gaps = clean_gap_terms(gap_analysis.get("service_gaps") or [], limit=5)
+        if service_gaps:
+            top = service_gaps[0]
             recs.append(
                 {
-                    "type": "content",
+                    "type": "positioning",
                     "priority": "high",
-                    "title": "Cover competitor service themes",
-                    "detail": f"Create content around: {', '.join(gap_analysis['service_gaps'][:5])}",
+                    "title": f"Build {top} positioning",
+                    "detail": (
+                        f"Competitors promote: {', '.join(service_gaps[:4])}. "
+                        f"Add {top} to your positioning if you genuinely offer it."
+                    ),
                 }
             )
         top = competitors[:3]

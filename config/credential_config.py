@@ -73,10 +73,48 @@ class Config(BaseModel):
     SUPABASE_TABLE_TRENDS: str = Field(
         default=os.getenv("SUPABASE_TABLE_TRENDS") or "trends"
     )
+    SUPABASE_TABLE_COMPETITORSANALYSIS: str = Field(
+        default=os.getenv("SUPABASE_TABLE_COMPETITORSANALYSIS") or "competitorsanalysis"
+    )
     FIRECRAWL_API_KEY: str = Field(default=os.getenv("FIRECRAWL_API_KEY"))
 
+    HIGGSFIELD_API_KEY: str = Field(
+        default=os.getenv("HIGGSFIELD_API_KEY") or os.getenv("HF_KEY") or ""
+    )
+    HIGGSFIELD_API_KEY_ID: str = Field(
+        default=os.getenv("HIGGSFIELD_API_KEY_ID")
+        or os.getenv("HIGGSFEED_API_KEY_ID")
+        or os.getenv("HF_API_KEY")
+        or ""
+    )
+    HIGGSFIELD_API_KEY_SECRET: str = Field(
+        default=os.getenv("HIGGSFIELD_API_KEY_SECRET")
+        or os.getenv("HIGGSFEED_API_KEY_SECRET")
+        or os.getenv("HF_API_SECRET")
+        or ""
+    )
+    HIGGSFIELD_IMAGE_MODEL: str = Field(
+        default=os.getenv("HIGGSFIELD_IMAGE_MODEL") or "higgsfield-ai/soul/standard"
+    )
+    HIGGSFIELD_VIDEO_MODEL: str = Field(
+        default=os.getenv("HIGGSFIELD_VIDEO_MODEL") or "higgsfield-ai/dop/standard"
+    )
+    HIGGSFIELD_MCP_URL: str = Field(
+        default=os.getenv("HIGGSFIELD_MCP_URL") or "https://mcp.higgsfield.ai/mcp"
+    )
 
 config = Config()
+
+
+def higgsfield_api_key() -> str:
+    combined = (config.HIGGSFIELD_API_KEY or "").strip()
+    if combined:
+        return combined
+    key_id = (config.HIGGSFIELD_API_KEY_ID or "").strip()
+    secret = (config.HIGGSFIELD_API_KEY_SECRET or "").strip()
+    if key_id and secret:
+        return f"{key_id}:{secret}"
+    return ""
 
 
 def resolve_supabase_api_key() -> str: 

@@ -105,7 +105,6 @@ def record_api_call(provider: str, *, n: int = 1, kind: str | None = None) -> No
 
 
 def bind_stats_to_thread(stats: ApiCallStats | None) -> None:
-    """Call inside a worker thread so increments still count."""
     _thread_local.stats = stats
     if stats is not None:
         _stats_var.set(stats)
