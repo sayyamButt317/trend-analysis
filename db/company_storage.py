@@ -37,7 +37,7 @@ def _insert_prompt_sync(request: AnalyzeCompanyRequest) -> str:
         "agent_type": AGENT_TYPE,
         "company_data": company_data,
         "region": request.region or company.get("region") or "unspecified",
-        "company_name": company.get("name") or request.company_name,
+        "company_name": company.get("name"),
         "company_id": request.company_id,
         "competitors": [],
         "request_payload": request.model_dump(mode="json"),

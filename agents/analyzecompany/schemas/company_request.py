@@ -58,10 +58,6 @@ class AnalyzeCompanyRequest(BaseModel):
         description="Optional operating / target region",
         examples=["Pakistan", "GCC", "North America"],
     )
-    company_name: Optional[str] = Field(
-        default=None,
-        validation_alias=AliasChoices("company_name", "companyname"),
-    )
     company_id: Optional[str] = Field(
         default=None,
         validation_alias=AliasChoices("company_id", "companyId"),
@@ -94,7 +90,7 @@ class AnalyzeCompanyRequest(BaseModel):
         text = normalize_profile_text(value)
         return text or None
 
-    @field_validator("region", "company_name", "company_id")
+    @field_validator("region", "company_id")
     @classmethod
     def _strip_optional(cls, value: str | None) -> str | None:
         if value is None:
@@ -134,8 +130,6 @@ class AnalyzeCompanyRequest(BaseModel):
 
     def _company_with_socials(self) -> dict[str, Any]:
         extras: dict[str, Any] = {}
-        if self.company_name:
-            extras["name"] = self.company_name
         if self.website_url:
             extras["website"] = self.website_url
         if self.instagram_username:
@@ -151,8 +145,6 @@ class AnalyzeCompanyRequest(BaseModel):
             if self.website_url
             else ""
         )
-        if self.company_name and not self.company_data:
-            profile_text = f"{self.company_name}. {profile_text}".strip()
 
         return merge_company_with_profile({"profile": profile_text, **extras})
 
@@ -160,9 +152,6 @@ class AnalyzeCompanyRequest(BaseModel):
         company = self._company_with_socials()
         profile = runtime_profile()
         post_limit = self.post_limit or profile.get("post_limit") or 10
-        company_name = (self.company_name or company.get("name") or "").strip()
-        if company_name:
-            company["name"] = company_name
         if self.website_url:
             company["website"] = self.website_url
 
@@ -176,7 +165,7 @@ class AnalyzeCompanyRequest(BaseModel):
         return {
             "company": company,
             "company_id": self.company_id,
-            "company_name": company_name or company.get("name"),
+            "company_name": company.get("name"),
             "company_username": company.get("instagram_username"),
             "company_description": company.get("description") or self.company_data,
             "company_profile": company.get("profile") or self.company_data,
@@ -186,7 +175,7 @@ class AnalyzeCompanyRequest(BaseModel):
             "company_instagram_username": company.get("instagram_username"),
             "company_linkedin_url": company.get("linkedin_url"),
             "analyze_company_social": bool(
-                company.get("instagram_username") or company_name or company.get("linkedin_url")
+                company.get("instagram_username") or company.get("name") or company.get("linkedin_url")
             ),
             "runtime_profile": profile,
             "skip_linkedin": profile.get("skip_linkedin"),

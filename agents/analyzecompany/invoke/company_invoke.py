@@ -16,19 +16,23 @@ logger = logging.getLogger(__name__)
 
 
 async def analyzeCompanyAgent(request: AnalyzeCompanyRequest) -> dict[str, Any]:
-    logger.info("Analyzing company: %s", request.company_name or request.website_url)
     start = time.time()
     begin_api_call_stats()
     config = request.to_agent_config()
     company = request.normalized_company()
     company_id = request.company_id
 
+    logger.info(
+        "Analyzing company: %s",
+        company.get("name") or request.website_url or request.company_id,
+    )
+
     log_pipeline_start(
-        company=company.get("name") or request.company_name,
+        company=company.get("name") or request.website_url or "unknown",
         website=request.website_url or company.get("website") or "none",
         region=request.region,
         instagram=request.instagram_username or "none",
-        linkedin="yes" if request.linkedin_url or request.company_name else "no",
+        linkedin="yes" if request.linkedin_url or company.get("linkedin_url") else "no",
         post_limit=config.get("post_limit"),
     )
 
