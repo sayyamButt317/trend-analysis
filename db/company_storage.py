@@ -125,13 +125,15 @@ async def save_company_analysis_run(
         }
 
 
-def _fetch_company_analysis_sync(analysis_id: str) -> dict[str, Any] | None:
+def _fetch_company_analysis_by_company_id_sync(company_id: str) -> dict[str, Any] | None:
+    """Latest analyze-company run for an external company_id."""
     client = get_supabase()
     response = (
         client.table(_analysis_table())
         .select("id,prompt_id,company_id,created_at,success,status,summary,result,agent_type,duration_sec")
-        .eq("id", analysis_id)
+        .eq("company_id", company_id)
         .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
         .limit(1)
         .execute()
     )
@@ -139,26 +141,42 @@ def _fetch_company_analysis_sync(analysis_id: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
-async def get_company_analysis(analysis_id: str) -> dict[str, Any] | None:
+async def get_company_analysis(company_id: str) -> dict[str, Any] | None:
     if not _is_storage_configured():
         raise RuntimeError("Supabase is not configured")
-    return await asyncio.to_thread(_fetch_company_analysis_sync, analysis_id)
+    return await asyncio.to_thread(_fetch_company_analysis_by_company_id_sync, company_id)
 
 
-def _list_company_analyses_sync(*, limit: int = 20) -> list[dict[str, Any]]:
+def _list_company_analyses_sync(
+    *,
+    limit: int = 20,
+    company_id: str | None = None,
+) -> list[dict[str, Any]]:
     client = get_supabase()
-    response = (
+    query = (
         client.table(_analysis_table())
         .select("id,prompt_id,company_id,created_at,success,status,summary,agent_type,duration_sec")
         .eq("agent_type", AGENT_TYPE)
-        .order("created_at", desc=True)
+    )
+    if company_id:
+        query = query.eq("company_id", company_id)
+    response = (
+        query.order("created_at", desc=True)
         .limit(max(1, min(limit, 100)))
         .execute()
     )
     return response.data or []
 
 
-async def list_company_analyses(*, limit: int = 20) -> list[dict[str, Any]]:
+async def list_company_analyses(
+    *,
+    limit: int = 20,
+    company_id: str | None = None,
+) -> list[dict[str, Any]]:
     if not _is_storage_configured():
         raise RuntimeError("Supabase is not configured")
-    return await asyncio.to_thread(_list_company_analyses_sync, limit=limit)
+    return await asyncio.to_thread(
+        _list_company_analyses_sync,
+        limit=limit,
+        company_id=company_id,
+    )
