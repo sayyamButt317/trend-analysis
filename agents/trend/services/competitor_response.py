@@ -1,7 +1,8 @@
-from collections import Counter
 from typing import Any
 from agents.trend.services.content_analyzer import build_market_content_usage
+from service.Competitor.company_business_intelligence import build_company_business_intelligence
 from service.Competitor.competitor_overview import build_competitor_overview, build_competitors_overview
+from service.Competitor.competitor_report import build_competitor_report
 from service.Competitor.competitor_analysis_sections import build_analysis_sections
 from service.Competitor.competitive_comparison import (
     build_competitor_vs_company_comparison,
@@ -145,6 +146,8 @@ def build_competitor_response(
     market_position: dict[str, Any] | None = None,
     strengths_and_weaknesses: dict[str, Any] | None = None,
     growth_opportunities: list[Any] | None = None,
+    recommended_actions: list[Any] | None = None,
+    positioning_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     posts_by_username: dict[str, list[dict]] = {}
     for post in processed_posts:
@@ -377,12 +380,58 @@ def build_competitor_response(
     )
     analysis["competitors_overview"] = competitors_overview
 
+    competitor_report = build_competitor_report(
+        summary=summary,
+        overview=overview,
+        competitors_overview=competitors_overview,
+        analysis=analysis,
+        competitive_gaps=competitive_gaps,
+        quantified_competitive_gaps=quantified_gaps,
+        content_intelligence=content_intelligence,
+        market_insights=market_insights,
+        hashtags=hashtags,
+        recommendations=recommendations,
+        recommended_actions=recommended_actions,
+        growth_opportunities=growth_opportunities,
+        digital_presence=digital_presence,
+        executive_snapshot=executive_snapshot,
+        market_position=market_position,
+        positioning_analysis=positioning_analysis,
+        strengths_and_weaknesses=strengths_and_weaknesses,
+        competitor_count=competitor_count,
+        post_count=post_count,
+        region=(filters or {}).get("region"),
+    )
+    analysis["report"] = competitor_report
+
+    business_intelligence = build_company_business_intelligence(
+        overview=overview,
+        competitors_overview=competitors_overview,
+        analysis=analysis,
+        competitive_gaps=competitive_gaps,
+        content_intelligence=content_intelligence,
+        market_insights=market_insights,
+        hashtags=hashtags,
+        recommendations=recommendations,
+        recommended_actions=recommended_actions,
+        growth_opportunities=growth_opportunities,
+        competitor_report=competitor_report,
+        competitor_vs_company=competitor_vs_company,
+        summary=summary,
+        region=(filters or {}).get("region"),
+        competitor_count=competitor_count,
+        post_count=post_count,
+    )
+    analysis["business_intelligence"] = business_intelligence
+
     return {
         "success": success,
         "error": error,
         "summary": summary,
         "overview": overview,
         "competitors_overview": competitors_overview,
+        "report": competitor_report,
+        "business_intelligence": business_intelligence,
         "company": {
             "name": company.get("name"),
             "instagram_username": company.get("instagram_username"),

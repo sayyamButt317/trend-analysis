@@ -18,8 +18,10 @@ _INTELLIGENCE_KEYS = (
     "executive_snapshot",
     "digital_presence",
     "market_position",
+    "positioning_analysis",
     "strengths_and_weaknesses",
     "growth_opportunities",
+    "recommended_actions",
 )
 
 
