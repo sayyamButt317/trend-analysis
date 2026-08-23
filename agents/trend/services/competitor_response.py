@@ -1,10 +1,13 @@
-from typing import Any, Counter
+from typing import Any
+
+from collections import Counter
 from agents.trend.services.content_analyzer import build_market_content_usage
 from service.Competitor.company_business_intelligence import build_company_business_intelligence
 from service.Competitor.competitor_overview import build_competitor_overview, build_competitors_overview
 from service.Competitor.competitor_report import build_competitor_report
 from service.Competitor.competitor_analysis_sections import build_analysis_sections
 from service.Competitor.competitive_comparison import (
+    build_competitive_matchup,
     build_competitor_vs_company_comparison,
     build_quantified_competitive_gaps,
 )
@@ -340,12 +343,17 @@ def build_competitor_response(
         competitors=competitor_profiles,
         competitor_intelligence_report=competitor_intelligence_report,
     )
+    competitive_matchup = build_competitive_matchup(
+        competitor_vs_company=competitor_vs_company,
+        raw_competitors=competitors,
+    )
     quantified_gaps = build_quantified_competitive_gaps(
         gap_analysis=gap_analysis,
         competitor_intelligence_report=competitor_intelligence_report,
         competitor_count=len(competitor_profiles),
     )
     analysis["competitor_vs_company_comparison"] = competitor_vs_company
+    analysis["competitive_matchup"] = competitive_matchup
     analysis["quantified_competitive_gaps"] = quantified_gaps
     analysis["competitive_gaps"] = competitive_gaps or {}
     analysis["content_intelligence"] = content_intelligence or {}
@@ -401,6 +409,7 @@ def build_competitor_response(
         competitor_count=competitor_count,
         post_count=post_count,
         region=(filters or {}).get("region"),
+        competitive_matchup=competitive_matchup,
     )
     analysis["report"] = competitor_report
 
@@ -417,6 +426,7 @@ def build_competitor_response(
         growth_opportunities=growth_opportunities,
         competitor_report=competitor_report,
         competitor_vs_company=competitor_vs_company,
+        competitive_matchup=competitive_matchup,
         summary=summary,
         region=(filters or {}).get("region"),
         competitor_count=competitor_count,
@@ -461,6 +471,7 @@ def build_competitor_response(
         "competitive_gaps": competitive_gaps or {},
         "content_intelligence": content_intelligence or {},
         "competitor_vs_company_comparison": competitor_vs_company,
+        "competitive_matchup": competitive_matchup,
         "quantified_competitive_gaps": quantified_gaps,
         "company_analysis": company_analysis,
         "competitor_intelligence_report": competitor_intelligence_report,

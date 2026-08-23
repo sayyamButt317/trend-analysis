@@ -98,6 +98,7 @@ def build_company_business_intelligence(
     growth_opportunities: list[Any] | None = None,
     competitor_report: dict[str, Any] | None = None,
     competitor_vs_company: dict[str, Any] | None = None,
+    competitive_matchup: dict[str, Any] | None = None,
     summary: str | None = None,
     region: str | None = None,
     competitor_count: int = 0,
@@ -159,6 +160,7 @@ def build_company_business_intelligence(
     competitor_section = {
         "title": "Competitor",
         "question": "Who is beating us and why?",
+        "who_we_compete_against": competitive_matchup or {},
         "competitors_outperforming": beating_us,
         "top_competitors": ((competitors_overview or {}).get("competitors") or [])[:5],
         "market_summary": (competitors_overview or {}).get("market_summary") or {},

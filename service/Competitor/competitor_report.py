@@ -194,6 +194,7 @@ def build_competitor_report(
     competitor_count: int = 0,
     post_count: int = 0,
     region: str | None = None,
+    competitive_matchup: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the numbered competitor analysis report sections."""
     analysis = analysis or {}
@@ -258,6 +259,8 @@ def build_competitor_report(
         "competitors": (competitors_overview or {}).get("competitors") or [],
         "similarity": analysis.get("similarity") or {},
         "competitor_profiles": analysis.get("competitors") or [],
+        "competitive_matchup": competitive_matchup or {},
+        "who_we_compete_against": competitive_matchup or {},
     }
 
     competitive_gaps_section = {

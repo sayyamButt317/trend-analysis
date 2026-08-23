@@ -436,3 +436,195 @@ def build_quantified_competitive_gaps(
             f"{gaps_raw.get('summary') or intel_gaps.get('summary') or ''}".strip()
         ),
     }
+
+
+def _title_label(value: str) -> str:
+    cleaned = str(value or "").strip()
+    if not cleaned:
+        return cleaned
+    return cleaned[0].upper() + cleaned[1:]
+
+
+def _threat_level(
+    *,
+    overall_similarity_pct: int,
+    they_stronger_count: int,
+    competitive_position: str,
+) -> str:
+    if overall_similarity_pct >= 70 and (they_stronger_count >= 3 or competitive_position in {"direct_rival", "behind"}):
+        return "High"
+    if overall_similarity_pct >= 50 or they_stronger_count >= 2 or competitive_position == "behind":
+        return "Medium"
+    if overall_similarity_pct >= 35:
+        return "Low"
+    return "Minimal"
+
+
+def _why_competitor_label(
+    *,
+    comparison: dict[str, Any],
+    raw: dict[str, Any],
+) -> str:
+    reasons = list(raw.get("match_reasons") or [])
+    if raw.get("why_competitor"):
+        return str(raw["why_competitor"]).strip()
+    if raw.get("description"):
+        return str(raw["description"]).strip()
+    if reasons:
+        return str(reasons[0]).strip()
+
+    position = (comparison.get("competitive_position") or {}).get("summary")
+    if position:
+        return str(position).strip()
+
+    sim = int(comparison.get("overall_similarity_pct") or 0)
+    name = (comparison.get("competitor") or {}).get("name") or "This competitor"
+    services = (comparison.get("services_comparison") or {}).get("shared") or []
+    if services:
+        return f"{name} overlaps {sim}% on DNA and shares services like {', '.join(services[:3])}."
+    return f"{name} is a {sim}% market match in your niche."
+
+
+def _strengths_from_comparison(comparison: dict[str, Any]) -> tuple[list[str], list[str]]:
+    """Return (they_are_stronger_at, you_are_stronger_at) labels."""
+    they: list[str] = []
+    you: list[str] = []
+
+    services = comparison.get("services_comparison") or {}
+    for item in services.get("competitor_only") or []:
+        they.append(f"{_title_label(item)} services")
+    for item in services.get("company_only") or []:
+        you.append(f"{_title_label(item)} services")
+    for item in services.get("shared") or []:
+        if item and f"Shared: {_title_label(item)}" not in they and f"Shared: {_title_label(item)}" not in you:
+            pass  # shared doesn't go to either side
+
+    tech = comparison.get("technology_comparison") or {}
+    for item in tech.get("competitor_only") or []:
+        they.append(f"{_title_label(item)} technology")
+    for item in tech.get("company_only") or []:
+        you.append(f"{_title_label(item)} technology")
+
+    social = (comparison.get("social_comparison") or {}).get("delta") or {}
+    if social.get("competitor_ahead_on_engagement"):
+        they.append("Instagram engagement rate")
+    elif social.get("company_ahead_on_engagement"):
+        you.append("Instagram engagement rate")
+    if social.get("competitor_ahead_on_followers"):
+        they.append("Instagram audience reach")
+    elif social.get("company_ahead_on_followers"):
+        you.append("Instagram audience reach")
+
+    content = comparison.get("content_comparison") or {}
+    comp_format = content.get("competitor_primary_format")
+    user_format = content.get("company_primary_format")
+    if comp_format and user_format and str(comp_format).lower() != str(user_format).lower():
+        they.append(f"{comp_format} content format")
+    for theme in content.get("competitor_only_themes") or []:
+        they.append(f"{_title_label(theme)} content")
+
+    hiring = comparison.get("hiring_comparison") or {}
+    if hiring.get("competitor_is_hiring") and not hiring.get("company_is_hiring"):
+        they.append("Active hiring signals")
+    elif hiring.get("company_is_hiring") and not hiring.get("competitor_is_hiring"):
+        you.append("Active hiring signals")
+
+    comp_snap = comparison.get("competitor") or {}
+    if comp_snap.get("is_hiring") and "Active hiring signals" not in they:
+        if not hiring.get("company_is_hiring"):
+            they.append("Active hiring signals")
+
+    dimensions = comparison.get("similarity_dimensions") or {}
+    for dim_key, label in (
+        ("marketing", "Marketing positioning"),
+        ("content", "Content strategy"),
+        ("location", "Regional presence"),
+    ):
+        dim = dimensions.get(dim_key) or {}
+        verdict = dim.get("verdict")
+        pct = int(dim.get("similarity_pct") or dim.get("overlap_pct") or 0)
+        if verdict == "direct_rival" and pct >= 70:
+            they.append(label)
+
+    they = list(dict.fromkeys(they))[:8]
+    you = list(dict.fromkeys(you))[:8]
+    return they, you
+
+
+def build_competitive_matchup(
+    *,
+    competitor_vs_company: dict[str, Any] | None,
+    raw_competitors: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """
+    Who we compete against and how we compare — per-competitor cards with
+    they_are_stronger_at, you_are_stronger_at, why_competitor, threat_level.
+    """
+    base = competitor_vs_company or {}
+    comparisons = base.get("comparisons") or []
+
+    raw_index: dict[str, dict[str, Any]] = {}
+    for comp in raw_competitors or []:
+        key = _competitor_lookup_key(comp)
+        if key:
+            raw_index[key] = comp
+
+    cards: list[dict[str, Any]] = []
+    for row in comparisons:
+        comp_snap = row.get("competitor") or {}
+        key = _competitor_lookup_key(comp_snap)
+        raw = raw_index.get(key) or {}
+        if not key:
+            raw = next(
+                (
+                    item
+                    for item in (raw_competitors or [])
+                    if (item.get("name") or "").strip().lower() == (comp_snap.get("name") or "").strip().lower()
+                ),
+                {},
+            )
+
+        they, you = _strengths_from_comparison(row)
+        position = (row.get("competitive_position") or {}).get("position") or "parity"
+        sim_pct = int(row.get("overall_similarity_pct") or 0)
+
+        cards.append(
+            {
+                "name": comp_snap.get("name"),
+                "username": comp_snap.get("username"),
+                "website": comp_snap.get("website"),
+                "linkedin_url": comp_snap.get("linkedin_url"),
+                "why_competitor": _why_competitor_label(comparison=row, raw=raw),
+                "overall_similarity_pct": sim_pct,
+                "match_score": row.get("match_score"),
+                "similarity_percentages": {
+                    "overall": sim_pct,
+                    "services": (row.get("similarity_dimensions") or {}).get("services", {}).get("similarity_pct"),
+                    "technology": (row.get("similarity_dimensions") or {}).get("technology", {}).get("similarity_pct"),
+                    "marketing": (row.get("similarity_dimensions") or {}).get("marketing", {}).get("similarity_pct"),
+                    "content": (row.get("similarity_dimensions") or {}).get("content", {}).get("similarity_pct"),
+                },
+                "they_are_stronger_at": they,
+                "you_are_stronger_at": you,
+                "threat_level": _threat_level(
+                    overall_similarity_pct=sim_pct,
+                    they_stronger_count=len(they),
+                    competitive_position=position,
+                ),
+                "competitive_position": position,
+                "competitive_position_summary": (row.get("competitive_position") or {}).get("summary"),
+            }
+        )
+
+    high_threats = sum(1 for card in cards if card.get("threat_level") == "High")
+    return {
+        "summary": (
+            f"You compete against {len(cards)} peer(s). "
+            f"{high_threats} pose a high threat based on overlap and where they outperform you."
+        ),
+        "company": base.get("company") or {},
+        "competitor_count": len(cards),
+        "high_threat_count": high_threats,
+        "competitors": cards,
+    }
+
