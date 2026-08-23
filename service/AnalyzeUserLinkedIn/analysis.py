@@ -67,6 +67,10 @@ async def fetch_linkedin_company_intel(
             linkedin_url=linkedin_url,
             limit=post_limit,
         )
+    if not company_size:
+        from service.Competitor.linkedin_employees import fetch_company_size_tavily
+
+        company_size = await fetch_company_size_tavily(company_name, linkedin_url=linkedin_url)
 
     hiring_signals = build_hiring_signals(jobs)
     capped = [] if skip_employees else employees[: min(max(effective_employee_limit, 0), 3)]

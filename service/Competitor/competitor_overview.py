@@ -10,6 +10,7 @@ from service.Competitor.competitor_intelligence_report import (
     _service_terms,
     _technology_terms,
 )
+from service.Competitor.linkedin_employees import competitor_linkedin_summary
 from service.Competitor.signal_extractor import collect_text_blobs, extract_industries_targeted
 
 
@@ -493,6 +494,15 @@ def _competitor_overview_item(
             "primary_format": strategy.get("primary_format") or ig.get("primary_format"),
             "linkedin_present": bool(profile.get("linkedin_url") or raw.get("linkedin_url")),
             "website_present": bool(profile.get("website") or raw.get("website")),
+            "linkedin_total_employees": profile.get("linkedin_total_employees") or raw.get("linkedin_total_employees"),
+            "linkedin_company_size": profile.get("linkedin_company_size")
+            or raw.get("linkedin_company_size")
+            or profile.get("company_size")
+            or raw.get("company_size"),
+            "linkedin_employee_range": profile.get("linkedin_employee_range") or raw.get("linkedin_employee_range"),
+            "linkedin_profiles_sampled": profile.get("linkedin_profiles_sampled")
+            or raw.get("linkedin_profiles_sampled")
+            or len(profile.get("employees") or raw.get("employees") or []),
         },
         "market_position_detail": {
             "category": category,
@@ -552,6 +562,7 @@ def build_competitors_overview(
     avg_match = round(sum(match_scores) / len(match_scores), 3) if match_scores else None
 
     market = market_insights or {}
+    linkedin_stats = competitor_linkedin_summary(raw_competitors or competitor_profiles)
     return {
         "total_competitors": len(items),
         "posts_analyzed": post_count,
@@ -562,6 +573,7 @@ def build_competitors_overview(
             "dominant_formats": market.get("dominant_content_types") or [],
             "dominant_themes": market.get("dominant_themes") or [],
             "dominant_categories": market.get("dominant_content_categories") or [],
+            **linkedin_stats,
         },
         "competitors": items,
     }

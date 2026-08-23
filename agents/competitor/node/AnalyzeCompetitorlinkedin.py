@@ -4,6 +4,7 @@ from typing import Any
 from agents.competitor.pipeline_log import log_event
 from agents.competitor.state.competitor_state import CompetitorState
 from agents.trend.services.company_social_analyzer import resolve_company_social_handles
+from service.Competitor.linkedin_employees import enrich_linkedin_employee_fields
 from service.AnalyzeUserLinkedIn import (
     build_company_urls_from_name,
     build_linkedin_analysis,
@@ -96,18 +97,21 @@ async def analyze_competitor_linkedin(
         jobs=jobs,
         company_size=intel.get("company_size"),
     )
+    employee_fields = enrich_linkedin_employee_fields(
+        company_size=intel.get("company_size"),
+        sampled_employees=employees[:employee_limit],
+        linkedin_analysis=analysis,
+    )
     enriched.update(
         {
             "linkedin_url": linkedin_url,
             "linkedin_posts": posts,
             "linkedin_analysis": analysis,
-            "employees": employees[:employee_limit],
-            "employee_count": len(employees[:employee_limit]),
             "job_openings": jobs,
-            "company_size": intel.get("company_size"),
             "is_hiring": bool(jobs),
             "hiring_signals": intel.get("hiring_signals") or [],
             "social_warnings": warnings,
+            **employee_fields,
         }
     )
     return enriched
@@ -180,13 +184,21 @@ async def AnalyzeCompetitorLinkedinNode(state: CompetitorState) -> CompetitorSta
                 "Competitor employees fetched",
                 name=name,
                 employees=len(item.get("employees") or []),
+                linkedin_total=item.get("linkedin_total_employees"),
             )
         except Exception:
             logger.exception(
                 "LinkedIn analysis failed for competitor=%s",
                 competitor.get("username") or competitor.get("name"),
             )
-            enriched.append({**competitor, "linkedin_analysis": None, "employees": []})
+            enriched.append(
+                {
+                    **competitor,
+                    **enrich_linkedin_employee_fields(sampled_employees=[]),
+                    "linkedin_analysis": None,
+                    "social_warnings": list(competitor.get("social_warnings") or []) + ["LinkedIn analysis failed."],
+                }
+            )
 
     state["discovered_influencers"] = enriched
     state["competitors"] = enriched

@@ -189,7 +189,12 @@ def _competitor_snapshot(competitor: dict[str, Any]) -> dict[str, Any]:
         "technologies": clean_gap_terms(_technology_terms(competitor), limit=15),
         "social": _competitor_social_metrics(competitor),
         "is_hiring": competitor.get("is_hiring"),
-        "company_size": competitor.get("company_size"),
+        "company_size": competitor.get("linkedin_company_size") or competitor.get("company_size"),
+        "linkedin_total_employees": competitor.get("linkedin_total_employees"),
+        "linkedin_company_size": competitor.get("linkedin_company_size") or competitor.get("company_size"),
+        "linkedin_employee_range": competitor.get("linkedin_employee_range"),
+        "linkedin_profiles_sampled": competitor.get("linkedin_profiles_sampled")
+        or len(competitor.get("employees") or []),
     }
 
 
@@ -594,6 +599,10 @@ def build_competitive_matchup(
                 "username": comp_snap.get("username"),
                 "website": comp_snap.get("website"),
                 "linkedin_url": comp_snap.get("linkedin_url"),
+                "linkedin_total_employees": comp_snap.get("linkedin_total_employees") or raw.get("linkedin_total_employees"),
+                "linkedin_company_size": comp_snap.get("linkedin_company_size")
+                or raw.get("linkedin_company_size")
+                or comp_snap.get("company_size"),
                 "why_competitor": _why_competitor_label(comparison=row, raw=raw),
                 "overall_similarity_pct": sim_pct,
                 "match_score": row.get("match_score"),

@@ -26,6 +26,23 @@ def _similarity_lookup(similarity_scores: list[dict] | None) -> dict[str, dict[s
     return lookup
 
 
+def _linkedin_employee_profile_fields(source: dict[str, Any]) -> dict[str, Any]:
+    """Expose LinkedIn company headcount separately from sampled profile count."""
+    sampled = source.get("linkedin_profiles_sampled")
+    if sampled is None:
+        sampled = len(source.get("employees") or [])
+    total = source.get("linkedin_total_employees")
+    size_label = source.get("linkedin_company_size") or source.get("company_size")
+    return {
+        "linkedin_total_employees": total,
+        "linkedin_company_size": size_label,
+        "linkedin_employee_range": source.get("linkedin_employee_range"),
+        "linkedin_profiles_sampled": sampled,
+        "employee_count": source.get("employee_count") or total or sampled,
+        "company_size": size_label,
+    }
+
+
 def _attach_similarity_fields(
     profile: dict[str, Any],
     *,
@@ -187,10 +204,8 @@ def build_competitor_response(
             "instagram_analysis": source.get("instagram_analysis"),
             "linkedin_analysis": source.get("linkedin_analysis"),
             "employees": source.get("employees") or [],
-            "employee_count": source.get("employee_count")
-            or len(source.get("employees") or []),
+            **_linkedin_employee_profile_fields(source),
             "job_openings": source.get("job_openings") or [],
-            "company_size": source.get("company_size"),
             "is_hiring": source.get("is_hiring"),
             "hiring_signals": source.get("hiring_signals") or [],
             "social_warnings": source.get("social_warnings") or [],
@@ -243,9 +258,8 @@ def build_competitor_response(
             "instagram_analysis": comp.get("instagram_analysis"),
             "linkedin_analysis": comp.get("linkedin_analysis"),
             "employees": comp.get("employees") or [],
-            "employee_count": comp.get("employee_count") or len(comp.get("employees") or []),
+            **_linkedin_employee_profile_fields(comp),
             "job_openings": comp.get("job_openings") or [],
-            "company_size": comp.get("company_size"),
             "is_hiring": comp.get("is_hiring"),
             "hiring_signals": comp.get("hiring_signals") or [],
             "social_warnings": comp.get("social_warnings") or [],
