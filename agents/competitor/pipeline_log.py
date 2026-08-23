@@ -33,6 +33,8 @@ PIPELINE_ORDER: list[tuple[str, str, str]] = [
     # Phase 4 — strategy output
     ("similarity_analysis", "4_strategy", "Similarity analysis"),
     ("gap_analysis", "4_strategy", "Gap analysis"),
+    ("competitive_gaps", "4_strategy", "Niche competitive gaps"),
+    ("competitive_content_intelligence", "4_strategy", "Competitive content intelligence"),
     ("competitor_intelligence", "4_strategy", "Competitor intelligence report"),
     ("recommendations", "4_strategy", "Generate recommendations"),
     ("generate_competitor_summary", "4_strategy", "Generate summary"),

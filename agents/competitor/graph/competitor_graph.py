@@ -14,6 +14,8 @@ from agents.competitor.node.ExtractHashtags import ExtractHashtagsNode
 from agents.competitor.node.ExtractPostData import ExtractPostDataNode
 from agents.competitor.node.FilterDuplicatePosts import FilterDuplicatePostsNode
 from agents.competitor.node.FindCompetitor import FindCompetitorNode
+from agents.competitor.node.CompetitiveContentIntelligence import CompetitiveContentIntelligenceNode
+from agents.competitor.node.CompetitiveGaps import CompetitiveGapsNode
 from agents.competitor.node.CompetitorIntelligenceNode import CompetitorIntelligenceNode
 from agents.competitor.node.GapAnalysisNode import GapAnalysisNode
 from agents.competitor.node.GenerateCompetitorSummary import GenerateCompetitorSummaryNode
@@ -59,6 +61,11 @@ competitor_graph.add_node("analyze_content_mix", with_pipeline_log("analyze_cont
 # Phase 4: strategy
 competitor_graph.add_node("similarity_analysis", with_pipeline_log("similarity_analysis", SimilarityAnalysisNode))
 competitor_graph.add_node("gap_analysis", with_pipeline_log("gap_analysis", GapAnalysisNode))
+competitor_graph.add_node("competitive_gaps", with_pipeline_log("competitive_gaps", CompetitiveGapsNode))
+competitor_graph.add_node(
+    "competitive_content_intelligence",
+    with_pipeline_log("competitive_content_intelligence", CompetitiveContentIntelligenceNode),
+)
 competitor_graph.add_node("competitor_intelligence", with_pipeline_log("competitor_intelligence", CompetitorIntelligenceNode))
 competitor_graph.add_node("recommendations", with_pipeline_log("recommendations", RecommendationNode))
 competitor_graph.add_node("generate_competitor_summary", with_pipeline_log("generate_competitor_summary", GenerateCompetitorSummaryNode))
@@ -90,7 +97,9 @@ competitor_graph.add_edge("extract_hashtags", "classify_topics")
 competitor_graph.add_edge("classify_topics", "analyze_content_mix")
 competitor_graph.add_edge("analyze_content_mix", "similarity_analysis")
 competitor_graph.add_edge("similarity_analysis", "gap_analysis")
-competitor_graph.add_edge("gap_analysis", "competitor_intelligence")
+competitor_graph.add_edge("gap_analysis", "competitive_gaps")
+competitor_graph.add_edge("competitive_gaps", "competitive_content_intelligence")
+competitor_graph.add_edge("competitive_content_intelligence", "competitor_intelligence")
 competitor_graph.add_edge("competitor_intelligence", "recommendations")
 competitor_graph.add_edge("recommendations", "generate_competitor_summary")
 competitor_graph.add_edge("generate_competitor_summary", END)

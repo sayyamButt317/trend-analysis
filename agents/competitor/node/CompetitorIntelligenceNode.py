@@ -9,6 +9,10 @@ from service.Competitor.competitor_intelligence_report import (
     compute_competitor_similarity,
     similarity_to_percentages,
 )
+from service.Competitor.competitive_comparison import (
+    build_competitor_vs_company_comparison,
+    build_quantified_competitive_gaps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +93,18 @@ async def competitor_intelligence_node(state: CompetitorState) -> CompetitorStat
     ai_report["competitor_intelligence_report"] = report
     ai_report["average_similarity"] = report.get("average_similarity")
     ai_report["competitor_gaps"] = report.get("gaps")
+    ai_report["competitor_vs_company_comparison"] = build_competitor_vs_company_comparison(
+        company=profile_data,
+        company_profile=profile_data,
+        company_analysis=state.get("company_analysis"),
+        competitors=competitors,
+        competitor_intelligence_report=report,
+    )
+    ai_report["quantified_competitive_gaps"] = build_quantified_competitive_gaps(
+        gap_analysis=state.get("gap_analysis"),
+        competitor_intelligence_report=report,
+        competitor_count=len(competitors),
+    )
     state["ai_report"] = ai_report
 
     avg = report.get("average_similarity") or {}

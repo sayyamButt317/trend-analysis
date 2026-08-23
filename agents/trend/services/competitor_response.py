@@ -2,6 +2,10 @@ from collections import Counter
 from typing import Any
 from agents.trend.services.content_analyzer import build_market_content_usage
 from service.Competitor.competitor_analysis_sections import build_analysis_sections
+from service.Competitor.competitive_comparison import (
+    build_competitor_vs_company_comparison,
+    build_quantified_competitive_gaps,
+)
 from service.Competitor.competitor_intelligence_report import (
     _competitor_lookup_key,
     similarity_to_percentages,
@@ -126,6 +130,8 @@ def build_competitor_response(
     company_profile: dict[str, Any] | None = None,
     search_intelligence: dict[str, Any] | None = None,
     gap_analysis: dict[str, Any] | None = None,
+    competitive_gaps: dict[str, Any] | None = None,
+    content_intelligence: dict[str, Any] | None = None,
     competitor_intelligence_report: dict[str, Any] | None = None,
     recommendations: list[dict] | None = None,
     ai_report: dict[str, Any] | None = None,
@@ -318,6 +324,23 @@ def build_competitor_response(
         processed_posts=processed_posts,
     )
 
+    competitor_vs_company = build_competitor_vs_company_comparison(
+        company=company,
+        company_profile=company_profile,
+        company_analysis=company_analysis,
+        competitors=competitor_profiles,
+        competitor_intelligence_report=competitor_intelligence_report,
+    )
+    quantified_gaps = build_quantified_competitive_gaps(
+        gap_analysis=gap_analysis,
+        competitor_intelligence_report=competitor_intelligence_report,
+        competitor_count=len(competitor_profiles),
+    )
+    analysis["competitor_vs_company_comparison"] = competitor_vs_company
+    analysis["quantified_competitive_gaps"] = quantified_gaps
+    analysis["competitive_gaps"] = competitive_gaps or {}
+    analysis["content_intelligence"] = content_intelligence or {}
+
     return {
         "success": success,
         "error": error,
@@ -348,6 +371,10 @@ def build_competitor_response(
         "company_profile": company_profile or {},
         "search_intelligence": search_intelligence or {},
         "gap_analysis": gap_analysis or {},
+        "competitive_gaps": competitive_gaps or {},
+        "content_intelligence": content_intelligence or {},
+        "competitor_vs_company_comparison": competitor_vs_company,
+        "quantified_competitive_gaps": quantified_gaps,
         "company_analysis": company_analysis,
         "competitor_intelligence_report": competitor_intelligence_report,
         "recommendations": recommendations or [],
