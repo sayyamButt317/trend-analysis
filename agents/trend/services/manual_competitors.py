@@ -1,10 +1,11 @@
-"""Resolve user-provided competitors: Instagram handles, LinkedIn URLs, or company names."""
+"""Resolve user-provided competitors: Instagram handles, LinkedIn URLs, website URLs, or company names."""
 
 from __future__ import annotations
 
 import logging
 import re
 from typing import Any
+from urllib.parse import urlparse
 
 from tavily import TavilyClient
 
@@ -12,6 +13,7 @@ from config.credential_config import config
 from scrapper.instagram_finder.extractor import extract_username
 from scrapper.instagram_finder.validator import is_valid_instagram_username
 from scrapper.tavily_retry import is_tavily_unreachable_error, tavily_search_with_retry
+from service.Competitor.firecrawl_service import is_scrapeable_website
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +79,34 @@ def _linkedin_url_from_input(value: str) -> str | None:
         return None
     slug = match.group(1).strip("/")
     return f"https://www.linkedin.com/company/{slug}/"
+
+
+def _website_url_from_input(value: str) -> str | None:
+    text = (value or "").strip()
+    if not text:
+        return None
+    if text.startswith("@"):
+        return None
+    if "linkedin.com" in text.lower() or "instagram.com" in text.lower():
+        return None
+    if not text.startswith(("http://", "https://")):
+        head = text.split("/")[0].strip()
+        if "." not in head:
+            return None
+        text = f"https://{text.lstrip('/')}"
+    if not is_scrapeable_website(text):
+        return None
+    parsed = urlparse(text)
+    if parsed.path in {"", "/"} and not parsed.query:
+        return f"{parsed.scheme}://{parsed.netloc}".lower()
+    return text.rstrip("/")
+
+
+def _company_name_from_website(url: str) -> str:
+    host = (urlparse(url).netloc or "").lower().removeprefix("www.")
+    label = host.split(".")[0] if host else "Competitor"
+    cleaned = re.sub(r"[^a-z0-9]+", " ", label, flags=re.I).strip()
+    return cleaned.title() if cleaned else "Competitor"
 
 
 def _company_name_from_input(value: str, *, ig: str | None, linkedin: str | None) -> str:
@@ -145,6 +175,7 @@ def _candidate_payload(
     name: str,
     username: str | None = None,
     linkedin_url: str | None = None,
+    website: str | None = None,
     discovered_by: str,
     raw_input: str,
 ) -> dict[str, Any]:
@@ -158,6 +189,7 @@ def _candidate_payload(
         "username": username,
         "instagram_username": username,
         "linkedin_url": linkedin_url,
+        "website": website,
         "profile_url": f"https://www.instagram.com/{username}/" if username else None,
         "socials": socials,
         "source": "manual",
@@ -183,6 +215,7 @@ async def resolve_manual_competitors(
     Accepted input forms (mixed list OK):
     - Instagram handle: "@confiz" or "confiz" or instagram.com/confiz
     - LinkedIn company URL: https://www.linkedin.com/company/confiz/
+    - Company website URL: https://confiz.com or confiz.com
     - Company name only: "Confiz" (resolved via Tavily to IG and/or LinkedIn)
     """
     inputs = normalize_competitor_inputs(competitors)
@@ -197,19 +230,28 @@ async def resolve_manual_competitors(
     for item in inputs:
         ig = _instagram_handle_from_input(item)
         linkedin = _linkedin_url_from_input(item)
+        website = _website_url_from_input(item) if not ig and not linkedin else None
         name = _company_name_from_input(item, ig=ig, linkedin=linkedin)
+        if website and not ig and not linkedin:
+            name = _company_name_from_website(website)
 
-        # Pure handle or LinkedIn URL — accept immediately.
-        if ig or linkedin:
-            key = (ig or "") or (linkedin or "").rstrip("/").lower()
+        # Pure handle, LinkedIn URL, or website URL — accept immediately.
+        if ig or linkedin or website:
+            key = (
+                (ig or "")
+                or (linkedin or "").rstrip("/").lower()
+                or (website or "").rstrip("/").lower()
+            )
             if key in seen_keys:
                 continue
             seen_keys.add(key)
             discovered = (
                 "user_provided_handle"
-                if ig and not linkedin
+                if ig and not linkedin and not website
                 else "user_provided_linkedin"
-                if linkedin and not ig
+                if linkedin and not ig and not website
+                else "user_provided_website"
+                if website and not ig and not linkedin
                 else "user_provided_socials"
             )
             candidates.append(
@@ -217,6 +259,7 @@ async def resolve_manual_competitors(
                     name=name,
                     username=ig,
                     linkedin_url=linkedin,
+                    website=website,
                     discovered_by=discovered,
                     raw_input=item,
                 )
@@ -287,16 +330,21 @@ async def resolve_manual_competitors(
     usable = [
         c
         for c in candidates
-        if c.get("username") or c.get("linkedin_url") or c.get("name")
+        if c.get("username") or c.get("linkedin_url") or c.get("website") or c.get("name")
     ]
 
     logger.info(
         "Manual competitor resolution: %s input(s) -> %s competitor(s) "
-        "(ig=%s linkedin=%s name_only=%s)",
+        "(ig=%s linkedin=%s website=%s name_only=%s)",
         len(inputs),
         len(usable),
         sum(1 for c in usable if c.get("username")),
         sum(1 for c in usable if c.get("linkedin_url")),
-        sum(1 for c in usable if not c.get("username") and not c.get("linkedin_url")),
+        sum(1 for c in usable if c.get("website")),
+        sum(
+            1
+            for c in usable
+            if not c.get("username") and not c.get("linkedin_url") and not c.get("website")
+        ),
     )
     return usable, warnings
