@@ -1,6 +1,7 @@
 from collections import Counter
 from typing import Any
 from agents.trend.services.content_analyzer import build_market_content_usage
+from service.Competitor.competitor_overview import build_competitor_overview, build_competitors_overview
 from service.Competitor.competitor_analysis_sections import build_analysis_sections
 from service.Competitor.competitive_comparison import (
     build_competitor_vs_company_comparison,
@@ -139,6 +140,11 @@ def build_competitor_response(
     company_analysis: dict[str, Any] | None = None,
     competitor_website_intel: list[dict] | None = None,
     web_crawl: dict[str, Any] | None = None,
+    executive_snapshot: dict[str, Any] | None = None,
+    digital_presence: dict[str, Any] | None = None,
+    market_position: dict[str, Any] | None = None,
+    strengths_and_weaknesses: dict[str, Any] | None = None,
+    growth_opportunities: list[Any] | None = None,
 ) -> dict[str, Any]:
     posts_by_username: dict[str, list[dict]] = {}
     for post in processed_posts:
@@ -341,10 +347,42 @@ def build_competitor_response(
     analysis["competitive_gaps"] = competitive_gaps or {}
     analysis["content_intelligence"] = content_intelligence or {}
 
+    overview = build_competitor_overview(
+        company=company,
+        company_profile=company_profile,
+        company_analysis=company_analysis,
+        region=(filters or {}).get("region"),
+        competitor_count=competitor_count,
+        post_count=post_count,
+        summary=summary,
+        executive_snapshot=executive_snapshot,
+        digital_presence=digital_presence,
+        market_position=market_position,
+        strengths_and_weaknesses=strengths_and_weaknesses,
+        growth_opportunities=growth_opportunities,
+        competitive_gaps=competitive_gaps,
+        content_intelligence=content_intelligence,
+        competitor_intelligence_report=competitor_intelligence_report,
+        recommendations=recommendations,
+    )
+    analysis["overview"] = overview
+
+    competitors_overview = build_competitors_overview(
+        competitor_profiles=competitor_profiles,
+        raw_competitors=competitors,
+        region=(filters or {}).get("region"),
+        post_count=post_count,
+        competitor_intelligence_report=competitor_intelligence_report,
+        market_insights=market_insights,
+    )
+    analysis["competitors_overview"] = competitors_overview
+
     return {
         "success": success,
         "error": error,
         "summary": summary,
+        "overview": overview,
+        "competitors_overview": competitors_overview,
         "company": {
             "name": company.get("name"),
             "instagram_username": company.get("instagram_username"),

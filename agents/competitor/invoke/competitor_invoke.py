@@ -14,6 +14,28 @@ from db.competitor_storage import save_competitor_run
 
 logger = logging.getLogger("competitor.pipeline")
 
+_INTELLIGENCE_KEYS = (
+    "executive_snapshot",
+    "digital_presence",
+    "market_position",
+    "strengths_and_weaknesses",
+    "growth_opportunities",
+)
+
+
+def _company_intelligence_from_state(
+    final_state: dict[str, Any],
+    agent_config: dict[str, Any],
+) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in _INTELLIGENCE_KEYS:
+        value = final_state.get(key)
+        if value is None:
+            value = agent_config.get(key)
+        if value is not None:
+            out[key] = value
+    return out
+
 
 def _attach_api_call_meta(meta: dict[str, Any], api_calls: dict[str, Any]) -> dict[str, Any]:
     meta.update(
@@ -159,6 +181,7 @@ async def competitorAnalysisAgent(
                 company_analysis=final_state.get("company_analysis"),
                 competitor_website_intel=final_state.get("competitor_website_intel"),
                 web_crawl=final_state.get("web_crawl"),
+                **_company_intelligence_from_state(final_state, agent_config),
             )
         except asyncio.TimeoutError:
             duration_sec = round(time.time() - start_time, 3)
@@ -189,6 +212,8 @@ async def competitorAnalysisAgent(
                     f"Analysis exceeded the {max_duration}s time limit. "
                     f"Retry with fewer competitors (current limit: {limit})."
                 ),
+                company_analysis=agent_config.get("company_analysis"),
+                **_company_intelligence_from_state({}, agent_config),
             )
         except Exception as exc:
             duration_sec = round(time.time() - start_time, 3)
@@ -213,6 +238,8 @@ async def competitorAnalysisAgent(
                     "agent_mode": "competitor",
                 },
                 error=str(exc),
+                company_analysis=agent_config.get("company_analysis"),
+                **_company_intelligence_from_state({}, agent_config),
             )
     finally:
         api_calls = end_api_call_stats()
