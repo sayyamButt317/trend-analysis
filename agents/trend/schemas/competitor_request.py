@@ -93,6 +93,13 @@ class CompetitorAnalysisRequest(BaseModel):
     strengths_and_weaknesses: Optional[dict[str, Any]] = None
     growth_opportunities: Optional[list[Any]] = None
     recommended_actions: Optional[list[Any]] = None
+    company_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("company_id", "companyId"),
+        serialization_alias="company_id",
+        description="External company identifier — used to store and retrieve competitor analysis results.",
+        examples=["550e8400-e29b-41d4-a716-446655440000", "org_12345"],
+    )
     region: str = Field(
         ...,
         min_length=2,
@@ -156,7 +163,7 @@ class CompetitorAnalysisRequest(BaseModel):
     )
 
 
-    @field_validator("company_data", "summary_text")
+    @field_validator("company_data", "summary_text", "company_id")
     @classmethod
     def _strip_text_fields(cls, value: str | None) -> str | None:
         if value is None:
@@ -308,6 +315,7 @@ class CompetitorAnalysisRequest(BaseModel):
             filters["industry"] = company["services"][0]
         config: dict[str, Any] = {
             "company": company,
+            "company_id": self.company_id,
             "company_name": company_name or company.get("name"),
             "company_username": company.get("instagram_username"),
             "company_description": company.get("description"),

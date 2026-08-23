@@ -24,21 +24,21 @@ def _is_storage_configured() -> bool:
     return bool((config.SUPABASE_URL or "").strip() and resolve_supabase_api_key())
 
 
-def _fetch_analyses_sync(analysis_id: str | None = None) -> list[dict[str, Any]]:
+def _fetch_analyses_sync(company_id: str | None = None) -> list[dict[str, Any]]:
     client = get_supabase()
     query = (
         client.table(_analysis_table())
-        .select("id,prompt_id,created_at,success,result")
+        .select("id,prompt_id,company_id,created_at,success,result")
         .eq("agent_type", AGENT_TYPE)
         .order("created_at", desc=True)
     )
-    if analysis_id:
-        query = query.eq("id", analysis_id)
+    if company_id:
+        query = query.eq("company_id", company_id)
 
     response = query.execute()
     rows = response.data or []
-    if analysis_id and not rows:
-        raise HTTPException(status_code=404, detail=f"Analysis not found: {analysis_id}")
+    if company_id and not rows:
+        raise HTTPException(status_code=404, detail=f"Competitor analysis not found for company_id: {company_id}")
     return rows
 
 
@@ -68,6 +68,7 @@ def _ensure_storage_configured() -> None:
 def _competitor_summary(
     competitor: dict[str, Any],
     *,
+    company_id: str | None,
     analysis_id: str,
     prompt_id: str,
     created_at: str | None,
@@ -75,6 +76,7 @@ def _competitor_summary(
 ) -> dict[str, Any]:
     posts = competitor.get("posts") or []
     return {
+        "company_id": company_id,
         "analysis_id": analysis_id,
         "prompt_id": prompt_id,
         "created_at": created_at,
@@ -100,6 +102,7 @@ def _flatten_content(analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for row in analyses:
         result = row.get("result") or {}
         analysis_id = str(row.get("id"))
+        company_id = row.get("company_id")
         prompt_id = str(row.get("prompt_id"))
         created_at = row.get("created_at")
         company_name = (result.get("company") or {}).get("name")
@@ -110,6 +113,7 @@ def _flatten_content(analyses: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for post in competitor.get("posts") or []:
                 content.append(
                     {
+                        "company_id": company_id,
                         "analysis_id": analysis_id,
                         "prompt_id": prompt_id,
                         "created_at": created_at,
@@ -139,6 +143,7 @@ def _collect_hashtags(analyses: list[dict[str, Any]]) -> dict[str, Any]:
     for row in analyses:
         result = row.get("result") or {}
         analysis_id = str(row.get("id"))
+        company_id = row.get("company_id")
         analysis_counter: Counter[str] = Counter()
 
         for competitor in result.get("competitors") or []:
@@ -153,6 +158,7 @@ def _collect_hashtags(analyses: list[dict[str, Any]]) -> dict[str, Any]:
         if analysis_counter:
             by_analysis.append(
                 {
+                    "company_id": company_id,
                     "analysis_id": analysis_id,
                     "prompt_id": str(row.get("prompt_id")),
                     "created_at": row.get("created_at"),
@@ -251,6 +257,7 @@ def _build_report(row: dict[str, Any], prompt: dict[str, Any] | None) -> dict[st
     competitors = [
         _competitor_summary(
             competitor,
+            company_id=row.get("company_id"),
             analysis_id=str(row.get("id")),
             prompt_id=str(row.get("prompt_id")),
             created_at=row.get("created_at"),
@@ -262,6 +269,7 @@ def _build_report(row: dict[str, Any], prompt: dict[str, Any] | None) -> dict[st
     return {
         "report_id": str(uuid.uuid4()),
         "generated_at": datetime.now(timezone.utc).isoformat(),
+        "company_id": row.get("company_id"),
         "analysis_id": str(row.get("id")),
         "prompt_id": str(row.get("prompt_id")),
         "analysis_created_at": row.get("created_at"),
@@ -314,10 +322,11 @@ def _report_list_item(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-async def create_competitor_report(analysis_id: str) -> dict[str, Any]:
+async def create_competitor_report(company_id: str) -> dict[str, Any]:
     _ensure_storage_configured()
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
     row = analyses[0]
+    analysis_id = str(row.get("id"))
     prompt_id = str(row.get("prompt_id"))
     prompt = await asyncio.to_thread(_fetch_prompt_sync, prompt_id)
 
@@ -338,16 +347,20 @@ async def create_competitor_report(analysis_id: str) -> dict[str, Any]:
     return {
         "success": True,
         "report_id": report_id,
+        "company_id": company_id,
         "analysis_id": analysis_id,
         "report": report,
     }
 
 
-async def get_stored_report(report_id: str) -> dict[str, Any]:
+async def get_stored_report(company_id: str) -> dict[str, Any]:
+    """Return the latest stored report for a company_id."""
     _ensure_storage_configured()
-    rows = await fetch_stored_reports(report_id=report_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
+    analysis_id = str(analyses[0].get("id"))
+    rows = await fetch_stored_reports(analysis_id=analysis_id)
     if not rows:
-        raise HTTPException(status_code=404, detail=f"Report not found: {report_id}")
+        raise HTTPException(status_code=404, detail=f"Report not found for company_id: {company_id}")
 
     row = rows[0]
     report = row.get("report") or {}
@@ -355,26 +368,31 @@ async def get_stored_report(report_id: str) -> dict[str, Any]:
     return {
         "success": True,
         "report_id": str(row.get("id")),
-        "analysis_id": str(row.get("analysis_id")),
+        "company_id": company_id,
+        "analysis_id": analysis_id,
         "created_at": row.get("created_at"),
         "report": report,
     }
 
 
-async def list_stored_reports(analysis_id: str | None = None) -> dict[str, Any]:
+async def list_stored_reports(company_id: str | None = None) -> dict[str, Any]:
     _ensure_storage_configured()
+    analysis_id: str | None = None
+    if company_id:
+        analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
+        analysis_id = str(analyses[0].get("id"))
     rows = await fetch_stored_reports(analysis_id=analysis_id)
     return {
         "success": True,
-        "analysis_id": analysis_id,
+        "company_id": company_id,
         "count": len(rows),
         "reports": [_report_list_item(row) for row in rows],
     }
 
 
-async def list_stored_competitors(analysis_id: str | None = None) -> dict[str, Any]:
+async def list_stored_competitors(company_id: str | None = None) -> dict[str, Any]:
     _ensure_storage_configured()
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
     competitors: list[dict[str, Any]] = []
 
     for row in analyses:
@@ -384,6 +402,7 @@ async def list_stored_competitors(analysis_id: str | None = None) -> dict[str, A
             competitors.append(
                 _competitor_summary(
                     competitor,
+                    company_id=row.get("company_id"),
                     analysis_id=str(row.get("id")),
                     prompt_id=str(row.get("prompt_id")),
                     created_at=row.get("created_at"),
@@ -393,35 +412,35 @@ async def list_stored_competitors(analysis_id: str | None = None) -> dict[str, A
 
     return {
         "success": True,
-        "analysis_id": analysis_id,
+        "company_id": company_id,
         "analysis_count": len(analyses),
         "count": len(competitors),
         "competitors": competitors,
     }
 
 
-async def list_stored_content(analysis_id: str | None = None) -> dict[str, Any]:
+async def list_stored_content(company_id: str | None = None) -> dict[str, Any]:
     _ensure_storage_configured()
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
     content = _flatten_content(analyses)
 
     return {
         "success": True,
-        "analysis_id": analysis_id,
+        "company_id": company_id,
         "analysis_count": len(analyses),
         "count": len(content),
         "content": content,
     }
 
 
-async def list_stored_hashtags(analysis_id: str | None = None) -> dict[str, Any]:
+async def list_stored_hashtags(company_id: str | None = None) -> dict[str, Any]:
     _ensure_storage_configured()
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
     hashtag_data = _collect_hashtags(analyses)
 
     return {
         "success": True,
-        "analysis_id": analysis_id,
+        "company_id": company_id,
         "analysis_count": len(analyses),
         **hashtag_data,
     }
@@ -433,6 +452,7 @@ def _analysis_overview_item(row: dict[str, Any]) -> dict[str, Any]:
     meta = result.get("meta") or {}
     filters = result.get("filters_applied") or {}
     return {
+        "company_id": row.get("company_id"),
         "analysis_id": str(row.get("id")),
         "prompt_id": str(row.get("prompt_id")),
         "created_at": row.get("created_at"),
@@ -498,11 +518,13 @@ def _build_analytics_payload(
     market = result.get("market_insights") or {}
     hashtag_data = _collect_hashtags([row])
     analysis_id = str(row.get("id"))
+    company_id = row.get("company_id")
 
     competitors = [
         _competitor_analytics_item(
             _competitor_summary(
                 competitor,
+                company_id=company_id,
                 analysis_id=analysis_id,
                 prompt_id=str(row.get("prompt_id")),
                 created_at=row.get("created_at"),
@@ -513,6 +535,7 @@ def _build_analytics_payload(
     ]
 
     return {
+        "company_id": company_id,
         "analysis_id": analysis_id,
         "prompt_id": str(row.get("prompt_id")),
         "overview": {
@@ -541,15 +564,15 @@ def _build_analytics_payload(
     }
 
 
-async def get_competitor_analytics(analysis_id: str | None = None) -> dict[str, Any]:
+async def get_competitor_analytics(company_id: str | None = None) -> dict[str, Any]:
     """Return a dashboard-ready analytics payload from stored analysis data."""
     _ensure_storage_configured()
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
 
     if not analyses:
         return {
             "success": True,
-            "analysis_id": analysis_id,
+            "company_id": company_id,
             "message": "No analysis data found. Run POST /competitor-analysis/analyze first.",
             "overview": None,
             "competitors": [],
@@ -568,10 +591,10 @@ async def get_competitor_analytics(analysis_id: str | None = None) -> dict[str, 
     }
 
 
-async def get_stored_analysis_result(analysis_id: str | None = None) -> dict[str, Any]:
-    """Return the exact competitor-agent response JSON saved in the analysis table."""
+async def get_stored_analysis_result(company_id: str | None = None) -> dict[str, Any]:
+    """Return the latest competitor-agent response for a company_id."""
     _ensure_storage_configured()
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, analysis_id)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
     if not analyses:
         raise HTTPException(
             status_code=404,
@@ -580,15 +603,15 @@ async def get_stored_analysis_result(analysis_id: str | None = None) -> dict[str
     return _row_to_agent_result(analyses[0])
 
 
-async def delete_stored_analysis_result(analysis_id: str) -> dict[str, Any]:
-    """Delete a stored competitor analysis result (and related prompt/reports)."""
+async def delete_stored_analysis_result(company_id: str) -> dict[str, Any]:
+    """Delete the latest stored competitor analysis for a company_id."""
     _ensure_storage_configured()
-    analysis_id = (analysis_id or "").strip()
-    if not analysis_id:
-        raise HTTPException(status_code=400, detail="analysis_id is required")
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
 
     try:
-        deleted = await delete_competitor_analysis(analysis_id)
+        deleted = await delete_competitor_analysis(company_id)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -610,16 +633,18 @@ async def list_stored_analysis_results(
     *,
     limit: int = 20,
     offset: int = 0,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
     """Return full saved agent payloads for recent competitor analysis runs."""
     _ensure_storage_configured()
     limit = max(1, min(int(limit or 20), 100))
     offset = max(0, int(offset or 0))
-    analyses = await asyncio.to_thread(_fetch_analyses_sync, None)
+    analyses = await asyncio.to_thread(_fetch_analyses_sync, company_id)
     page = analyses[offset : offset + limit]
     results = [_row_to_agent_result(row) for row in page]
     return {
         "success": True,
+        "company_id": company_id,
         "count": len(results),
         "total": len(analyses),
         "limit": limit,
@@ -644,6 +669,7 @@ def _row_to_agent_result(row: dict[str, Any]) -> dict[str, Any]:
 
     result.setdefault("meta", {})
     if isinstance(result["meta"], dict):
+        result["meta"]["company_id"] = row.get("company_id")
         result["meta"]["analysis_id"] = str(row.get("id"))
         result["meta"]["prompt_id"] = str(row.get("prompt_id")) if row.get("prompt_id") else None
         result["meta"]["created_at"] = row.get("created_at")

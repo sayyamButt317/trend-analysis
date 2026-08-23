@@ -226,6 +226,7 @@ async def competitorAnalysisAgent(
     storage_ids = await save_competitor_run(request, result, duration_sec=duration_sec)
     result.setdefault("meta", {})
     result["meta"]["prompt_id"] = storage_ids.get("prompt_id")
+    result["meta"]["company_id"] = storage_ids.get("company_id") or request.company_id
     result["meta"]["analysis_id"] = storage_ids.get("analysis_id")
     if storage_ids.get("storage_error"):
         result["meta"]["storage_error"] = storage_ids["storage_error"]

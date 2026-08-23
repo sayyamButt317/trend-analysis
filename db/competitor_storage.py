@@ -30,6 +30,7 @@ def _insert_prompt_sync(request: CompetitorAnalysisRequest) -> str:
         "company_data": request.company_data,
         "region": request.region,
         "company_name": company.get("name"),
+        "company_id": request.company_id,
         "competitors": request.competitors or [],
         "request_payload": request.model_dump(mode="json"),
     }
@@ -47,12 +48,14 @@ def _insert_analysis_sync(
     duration_sec: float,
     company_name: str | None = None,
     region: str | None = None,
+    company_id: str | None = None,
 ) -> str:
     client = get_supabase()
     meta = result.get("meta") or {}
     row = {
         "prompt_id": prompt_id,
         "agent_type": AGENT_TYPE,
+        "company_id": company_id or meta.get("company_id"),
         "status": meta.get("status") or ("success" if result.get("success") else "failed"),
         "success": bool(result.get("success")),
         "error": result.get("error"),
@@ -88,9 +91,9 @@ async def save_competitor_run(
         )
         if (config.SUPABASE_KEY or "").startswith("sb_publishable_"):
             logger.warning(message)
-            return {"prompt_id": None, "analysis_id": None, "storage_error": message}
+            return {"prompt_id": None, "analysis_id": None, "company_id": None, "storage_error": message}
         logger.warning("Supabase not configured; skipping prompts/analysis persistence")
-        return {"prompt_id": None, "analysis_id": None, "storage_error": "Supabase not configured"}
+        return {"prompt_id": None, "analysis_id": None, "company_id": None, "storage_error": "Supabase not configured"}
 
     try:
         prompt_id = await asyncio.to_thread(_insert_prompt_sync, request)
@@ -102,14 +105,21 @@ async def save_competitor_run(
             duration_sec=duration_sec,
             company_name=company.get("name") or request.company_name,
             region=request.region,
+            company_id=request.company_id,
         )
         logger.info(
-            "Saved competitor run prompt_id=%s analysis_id=%s table=%s",
+            "Saved competitor run prompt_id=%s analysis_id=%s company_id=%s table=%s",
             prompt_id,
             analysis_id,
+            request.company_id,
             _analysis_table(),
         )
-        return {"prompt_id": prompt_id, "analysis_id": analysis_id, "storage_error": None}
+        return {
+            "prompt_id": prompt_id,
+            "analysis_id": analysis_id,
+            "company_id": request.company_id,
+            "storage_error": None,
+        }
     except Exception as exc:
         logger.exception("Failed to save competitor run to Supabase")
         message = str(exc)
@@ -122,8 +132,33 @@ async def save_competitor_run(
         return {
             "prompt_id": None,
             "analysis_id": None,
+            "company_id": None,
             "storage_error": message,
         }
+
+
+def _resolve_analysis_id_sync(company_id: str) -> str:
+    client = get_supabase()
+    response = (
+        client.table(_analysis_table())
+        .select("id")
+        .eq("company_id", company_id)
+        .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        raise LookupError(f"Competitor analysis not found for company_id: {company_id}")
+    return str(rows[0]["id"])
+
+
+def _delete_analysis_by_company_id_sync(company_id: str) -> dict[str, Any]:
+    analysis_id = _resolve_analysis_id_sync(company_id)
+    deleted = _delete_analysis_sync(analysis_id)
+    deleted["company_id"] = company_id
+    return deleted
 
 
 def _reports_table() -> str:
@@ -212,13 +247,14 @@ def _delete_analysis_sync(analysis_id: str) -> dict[str, Any]:
     }
 
 
-async def delete_competitor_analysis(analysis_id: str) -> dict[str, Any]:
+async def delete_competitor_analysis(company_id: str) -> dict[str, Any]:
     if not _is_storage_configured():
         raise RuntimeError("Supabase is not configured")
 
-    result = await asyncio.to_thread(_delete_analysis_sync, analysis_id)
+    result = await asyncio.to_thread(_delete_analysis_by_company_id_sync, company_id)
     logger.info(
-        "Deleted competitor analysis analysis_id=%s prompt_id=%s reports=%s prompt_deleted=%s",
+        "Deleted competitor analysis company_id=%s analysis_id=%s prompt_id=%s reports=%s prompt_deleted=%s",
+        result.get("company_id"),
         result.get("analysis_id"),
         result.get("prompt_id"),
         result.get("deleted_reports"),

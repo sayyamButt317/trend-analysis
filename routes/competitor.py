@@ -25,8 +25,8 @@ router = APIRouter(prefix="/competitor-analysis", tags=["Competitor Analysis"])
     description=(
         "Runs the competitor agent. Prefer passing `company`, `summary_text`, and "
         "`company_analysis` from POST /analyze-company/analyze so your website/"
-        "Instagram/LinkedIn are not re-analyzed every run. Long runs often hit "
-        "gateway 504 — prefer async."
+        "Instagram/LinkedIn are not re-analyzed every run. Pass `company_id` to link "
+        "and retrieve results later. Long runs often hit gateway 504 — prefer async."
     ),
 )
 async def competitorAnalysis(request: CompetitorAnalysisRequest):
@@ -52,7 +52,7 @@ async def competitorAnalysisAsync(request: CompetitorAnalysisRequest):
     summary="Poll async competitor analysis job status",
     description=(
         "Returns job status: queued | running | completed | failed. "
-        "When completed, includes the full agent result JSON and analysis_id."
+        "When completed, includes the full agent result JSON and company_id."
     ),
 )
 async def getCompetitorJobStatus(job_id: str):
@@ -60,6 +60,7 @@ async def getCompetitorJobStatus(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job not found: {job_id}")
 
+    company_id = job.get("company_id")
     payload = {
         "success": True,
         "job_id": job["job_id"],
@@ -67,18 +68,18 @@ async def getCompetitorJobStatus(job_id: str):
         "created_at": job.get("created_at"),
         "updated_at": job.get("updated_at"),
         "company_name": job.get("company_name"),
+        "company_id": company_id,
         "region": job.get("region"),
         "competitor_limit": job.get("competitor_limit"),
         "elapsed_sec": job.get("elapsed_sec"),
-        "analysis_id": job.get("analysis_id"),
         "prompt_id": job.get("prompt_id"),
         "error": job.get("error"),
         "poll_url": f"/competitor-analysis/jobs/{job_id}",
     }
     if job.get("status") == "completed" and job.get("result") is not None:
         payload["result"] = job["result"]
-        if job.get("analysis_id"):
-            payload["result_url"] = f"/competitor-analysis/results/{job['analysis_id']}"
+        if company_id:
+            payload["result_url"] = f"/competitor-analysis/results/{company_id}"
     return payload
 
 
@@ -87,52 +88,55 @@ async def getCompetitorJobStatus(job_id: str):
     summary="List all full saved competitor-agent responses",
     description=(
         "Returns every stored competitor analysis payload (same JSON shape as POST /analyze). "
-        "Use limit/offset for pagination."
+        "Use limit/offset for pagination. Pass company_id to filter one company."
     ),
 )
 async def listStoredAnalysisResults(
     limit: int = Query(default=20, ge=1, le=100, description="Max runs to return"),
     offset: int = Query(default=0, ge=0, description="Number of runs to skip"),
+    company_id: str | None = Query(default=None, description="Filter by external company_id"),
 ):
-    return await list_stored_analysis_results(limit=limit, offset=offset)
+    return await list_stored_analysis_results(limit=limit, offset=offset, company_id=company_id)
 
 
 @router.get(
     "/results",
-    summary="Get the full saved competitor-agent response",
+    summary="Get the latest saved competitor-agent response",
     description=(
-        "Returns the exact JSON payload saved from POST /analyze (same shape as the live agent response). "
-        "Pass analysis_id for a specific run; omit it to get the latest."
+        "Returns the exact JSON payload saved from POST /analyze. "
+        "Pass company_id for a specific company; omit it to get the most recent run."
     ),
 )
 async def getStoredAnalysisResult(
-    analysis_id: str | None = Query(
+    company_id: str | None = Query(
         default=None,
-        description="Analysis UUID from meta.analysis_id. If omitted, returns the most recent run.",
+        description="External company_id from POST /analyze. If omitted, returns the most recent run.",
     ),
 ):
-    return await get_stored_analysis_result(analysis_id)
+    return await get_stored_analysis_result(company_id)
 
 
 @router.get(
-    "/results/{analysis_id}",
-    summary="Get a full saved competitor-agent response by ID",
-    description="Returns the exact JSON payload saved from POST /analyze for this analysis_id.",
+    "/results/{company_id}",
+    summary="Get the latest saved competitor analysis by company_id",
+    description=(
+        "Returns the most recent competitor analysis result for the given external company_id."
+    ),
 )
-async def getStoredAnalysisResultById(analysis_id: str):
-    return await get_stored_analysis_result(analysis_id)
+async def getStoredAnalysisResultById(company_id: str):
+    return await get_stored_analysis_result(company_id)
 
 
 @router.delete(
-    "/results/{analysis_id}",
-    summary="Delete a saved competitor-agent result",
+    "/results/{company_id}",
+    summary="Delete a saved competitor analysis by company_id",
     description=(
-        "Deletes the stored analysis row for this analysis_id, plus related reports "
+        "Deletes the latest stored analysis row for this company_id, plus related reports "
         "and the orphaned prompt row when nothing else references it."
     ),
 )
-async def deleteStoredAnalysisResult(analysis_id: str):
-    return await delete_stored_analysis_result(analysis_id)
+async def deleteStoredAnalysisResult(company_id: str):
+    return await delete_stored_analysis_result(company_id)
 
 
 @router.get(
@@ -140,16 +144,16 @@ async def deleteStoredAnalysisResult(analysis_id: str):
     summary="Show competitor analytics dashboard data",
     description=(
         "Returns a consolidated analytics view: overview, competitors, content breakdown, "
-        "hashtags, and market insights. Omit analysis_id to use the latest saved run."
+        "hashtags, and market insights. Pass company_id or omit for the latest run."
     ),
 )
 async def getAnalytics(
-    analysis_id: str | None = Query(
+    company_id: str | None = Query(
         default=None,
-        description="Analysis UUID. If omitted, returns analytics for the most recent run.",
+        description="External company_id. If omitted, returns analytics for the most recent run.",
     ),
 ):
-    return await get_competitor_analytics(analysis_id)
+    return await get_competitor_analytics(company_id)
 
 
 @router.get(
@@ -157,13 +161,13 @@ async def getAnalytics(
     summary="List stored competitor profiles from the database",
     description=(
         "Returns competitor profiles saved from past analysis runs. "
-        "Pass analysis_id to filter a single run."
+        "Pass company_id to filter a single company."
     ),
 )
 async def getStoredCompetitors(
-    analysis_id: str | None = Query(default=None, description="Filter by analysis UUID"),
+    company_id: str | None = Query(default=None, description="Filter by external company_id"),
 ):
-    return await list_stored_competitors(analysis_id)
+    return await list_stored_competitors(company_id)
 
 
 @router.get(
@@ -171,13 +175,13 @@ async def getStoredCompetitors(
     summary="List stored post content from the database",
     description=(
         "Returns all analyzed posts saved in past runs. "
-        "Pass analysis_id to filter a single run."
+        "Pass company_id to filter a single company."
     ),
 )
 async def getStoredContent(
-    analysis_id: str | None = Query(default=None, description="Filter by analysis UUID"),
+    company_id: str | None = Query(default=None, description="Filter by external company_id"),
 ):
-    return await list_stored_content(analysis_id)
+    return await list_stored_content(company_id)
 
 
 @router.get(
@@ -185,43 +189,44 @@ async def getStoredContent(
     summary="List stored hashtags from the database",
     description=(
         "Returns aggregated hashtags from saved analyses, with optional per-run breakdown. "
-        "Pass analysis_id to filter a single run."
+        "Pass company_id to filter a single company."
     ),
 )
 async def getStoredHashtags(
-    analysis_id: str | None = Query(default=None, description="Filter by analysis UUID"),
+    company_id: str | None = Query(default=None, description="Filter by external company_id"),
 ):
-    return await list_stored_hashtags(analysis_id)
+    return await list_stored_hashtags(company_id)
 
 
 @router.post(
     "/report",
     summary="Create and store a competitor analysis report",
     description=(
-        "Builds a structured report for a saved analysis run and persists it to the reports table."
+        "Builds a structured report for the latest saved analysis of a company_id "
+        "and persists it to the reports table."
     ),
 )
 async def createReport(
-    analysis_id: str = Query(..., description="Analysis UUID to generate the report from"),
+    company_id: str = Query(..., description="External company_id to generate the report from"),
 ):
-    return await create_competitor_report(analysis_id)
+    return await create_competitor_report(company_id)
 
 
 @router.get(
     "/reports",
     summary="List stored reports from the database",
-    description="Returns saved report summaries. Pass analysis_id to filter by analysis run.",
+    description="Returns saved report summaries. Pass company_id to filter by company.",
 )
 async def getStoredReports(
-    analysis_id: str | None = Query(default=None, description="Filter by analysis UUID"),
+    company_id: str | None = Query(default=None, description="Filter by external company_id"),
 ):
-    return await list_stored_reports(analysis_id)
+    return await list_stored_reports(company_id)
 
 
 @router.get(
-    "/reports/{report_id}",
-    summary="Get a stored report by ID",
-    description="Returns the full report JSON saved in the reports table.",
+    "/reports/{company_id}",
+    summary="Get the latest stored report by company_id",
+    description="Returns the most recent report JSON for this company_id.",
 )
-async def getStoredReportById(report_id: str):
-    return await get_stored_report(report_id)
+async def getStoredReportById(company_id: str):
+    return await get_stored_report(company_id)

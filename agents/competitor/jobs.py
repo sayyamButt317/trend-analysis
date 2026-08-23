@@ -22,7 +22,6 @@ def _now() -> str:
 
 
 async def create_competitor_job(request: CompetitorAnalysisRequest) -> dict[str, Any]:
-    """Queue a full competitor analysis and return immediately."""
     job_id = str(uuid.uuid4())
     company = request.normalized_company()
     snapshot = {
@@ -31,6 +30,7 @@ async def create_competitor_job(request: CompetitorAnalysisRequest) -> dict[str,
         "created_at": _now(),
         "updated_at": _now(),
         "company_name": company.get("name") or request.company_name,
+        "company_id": request.company_id,
         "region": request.region,
         "competitor_limit": request.competitor_limit,
         "error": None,
@@ -86,15 +86,16 @@ async def _run_competitor_job(job_id: str, request: CompetitorAnalysisRequest) -
             job_id,
             status="completed",
             result=result,
+            company_id=meta.get("company_id") or request.company_id,
             analysis_id=meta.get("analysis_id"),
             prompt_id=meta.get("prompt_id"),
             elapsed_sec=round(time.time() - started, 3),
             error=result.get("error") if isinstance(result, dict) else None,
         )
         logger.info(
-            "Competitor job completed job_id=%s analysis_id=%s elapsed_sec=%.1f",
+            "Competitor job completed job_id=%s company_id=%s elapsed_sec=%.1f",
             job_id,
-            meta.get("analysis_id"),
+            meta.get("company_id") or request.company_id,
             time.time() - started,
         )
     except Exception as exc:
