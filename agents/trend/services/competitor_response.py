@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Counter
 from agents.trend.services.content_analyzer import build_market_content_usage
 from service.Competitor.company_business_intelligence import build_company_business_intelligence
 from service.Competitor.competitor_overview import build_competitor_overview, build_competitors_overview
