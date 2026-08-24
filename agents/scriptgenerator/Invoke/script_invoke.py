@@ -13,16 +13,20 @@ from agents.scriptgenerator.State.scriptstate import ScriptState
 async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, Any]:
     start = time.time()
     config = request.to_agent_config()
+    content_type = config["content_type"]
 
     log_pipeline_start(
-        user_request=request.user_request,
-        duration_seconds=request.duration_seconds,
-        aspect_ratio=request.aspect_ratio,
-        style=request.style,
+        user_request=config["user_request"],
+        content_type=content_type,
+        duration_seconds=config["duration_seconds"],
+        aspect_ratio=config["aspect_ratio"],
+        style=config["style"],
     )
 
     initial_state: ScriptState = {
         "user_request": config["user_request"],
+        "content_type": content_type,
+        "content_suggestion": config.get("content_suggestion") or {},
         "duration_seconds": config["duration_seconds"],
         "aspect_ratio": config["aspect_ratio"],
         "style": config["style"],
@@ -47,6 +51,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
                 "duration_sec": duration,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "agent_mode": "script_generation",
+                "content_type": content_type,
             },
         }
 
@@ -61,13 +66,21 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
         duration_sec=duration,
         scenes=len(scenes),
         characters=len(final_state.get("characters") or []),
+        content_type=content_type,
         error=(str(error)[:120] if error else None),
     )
-    log_event("9_complete", "Result summary", success=success, scenes=len(scenes))
+    log_event(
+        "9_complete",
+        "Result summary",
+        success=success,
+        scenes=len(scenes),
+        content_type=content_type,
+    )
 
     return {
         "success": success,
         "error": error,
+        "content_type": content_type,
         "project": final_state.get("project") or {},
         "script": final_state.get("script") or {},
         "characters": final_state.get("characters") or [],
@@ -77,8 +90,9 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
             "duration_sec": duration,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_mode": "script_generation",
-            "aspect_ratio": request.aspect_ratio,
-            "style": request.style,
-            "duration_seconds": request.duration_seconds,
+            "content_type": content_type,
+            "aspect_ratio": config["aspect_ratio"],
+            "style": config["style"],
+            "duration_seconds": config["duration_seconds"],
         },
     }

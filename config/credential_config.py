@@ -102,6 +102,12 @@ class Config(BaseModel):
     HIGGSFIELD_MCP_URL: str = Field(
         default=os.getenv("HIGGSFIELD_MCP_URL") or "https://mcp.higgsfield.ai/mcp"
     )
+    GEMINI_API_KEY: str = Field(default=os.getenv("GEMINI_API_KEY"))
+    GEMINI_MODEL_NAME: str = Field(default=os.getenv("GEMINI_MODEL_NAME"))
+    GEMINI_IMAGE_MODEL: str = Field(
+        default=os.getenv("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image",
+        description="Gemini model used for still image generation.",
+    )
 
 config = Config()
 

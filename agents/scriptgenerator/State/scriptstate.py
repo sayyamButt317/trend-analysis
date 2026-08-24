@@ -14,6 +14,9 @@ class Project(BaseModel):
     tone: str = ""
     duration_seconds: int = 30
     aspect_ratio: str = "16:9"
+    content_type: str = "video"
+    platform: str = ""
+    format: str = ""
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -23,6 +26,10 @@ class Script(BaseModel):
     title: str = ""
     logline: str = ""
     body: str = ""
+    caption: str = ""
+    hook: str = ""
+    cta: str = ""
+    content_type: str = "video"
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -50,12 +57,17 @@ class Scene(BaseModel):
     camera: str = ""
     visual_style: str = ""
     visual_prompt: str = ""
+    media_type: str = "video"
+    headline: str = ""
+    body_text: str = ""
     image_url: str | None = None
     video_url: str | None = None
 
 
 class ScriptState(TypedDict, total=False):
     user_request: str
+    content_type: str
+    content_suggestion: dict[str, Any]
     duration_seconds: int
     aspect_ratio: str
     style: str

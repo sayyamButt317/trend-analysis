@@ -13,10 +13,39 @@ from agents.scriptgenerator.State.scriptstate import (
 )
 
 
+def _suggestion(state: ScriptState) -> dict:
+    value = state.get("content_suggestion") or {}
+    return value if isinstance(value, dict) else {}
+
+
 async def CharacterManagerNode(state: ScriptState) -> ScriptState:
     logs = list(state.get("logs") or [])
     project = parse_project(state.get("project"))
     script = parse_script(state.get("script"))
+    content_type = (state.get("content_type") or project.content_type or "video").strip().lower()
+    suggestion = _suggestion(state)
+
+    if content_type == "image":
+        # Still/carousel posts often need no on-screen talent; keep a light brand subject.
+        characters = [
+            Character(
+                id=str(uuid.uuid4())[:8],
+                name="Brand Visual",
+                description=(
+                    f"Visual subject for {suggestion.get('format') or 'image'} content "
+                    f"about {suggestion.get('topic') or script.title}."
+                ),
+                appearance=str(
+                    suggestion.get("visual_direction")
+                    or state.get("style")
+                    or "Clean modern brand graphic, high contrast, minimal clutter"
+                )[:400],
+                personality="Clear and professional",
+            )
+        ]
+        logs.append("character_manager:image_brand_visual")
+        log_event("1_story", "Image subject defined", count=1)
+        return {**state, "characters": [as_dict(c) for c in characters], "logs": logs}
 
     payload = await complete_json(
         system=(
@@ -27,6 +56,7 @@ async def CharacterManagerNode(state: ScriptState) -> ScriptState:
         user=(
             f"Project: {project.name}\n"
             f"Logline: {script.logline}\n"
+            f"Suggestion: {suggestion}\n"
             f"Script:\n{script.body}"
         ),
     )

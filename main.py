@@ -2,15 +2,16 @@ import logging
 import sys
 import asyncio
 from contextlib import asynccontextmanager
-
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
 from core.exception_handlers import register_exception_handlers
 from routes import api_router
+from service.ImageGeneration.gemini_image import generated_images_dir
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -84,6 +85,11 @@ async def health_check():
 
 
 app.include_router(api_router)
+app.mount(
+    "/media/images",
+    StaticFiles(directory=str(generated_images_dir())),
+    name="generated_images",
+)
 
 
 if __name__ == "__main__":
