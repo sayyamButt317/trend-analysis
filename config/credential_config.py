@@ -76,6 +76,12 @@ class Config(BaseModel):
     SUPABASE_TABLE_COMPETITORSANALYSIS: str = Field(
         default=os.getenv("SUPABASE_TABLE_COMPETITORSANALYSIS") or "competitorsanalysis"
     )
+    SUPABASE_TABLE_CONTENT_RECOMMENDATION: str = Field(
+        default=os.getenv("SUPABASE_TABLE_CONTENT_RECOMMENDATION") or "content_recommendation"
+    )
+    SUPABASE_TABLE_SCRIPT: str = Field(
+        default=os.getenv("SUPABASE_TABLE_SCRIPT") or "script"
+    )
     FIRECRAWL_API_KEY: str = Field(default=os.getenv("FIRECRAWL_API_KEY"))
 
     HIGGSFIELD_API_KEY: str = Field(

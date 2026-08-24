@@ -558,12 +558,40 @@ def build_content_calendar(
 
 def build_recommendation_payload(state: dict[str, Any]) -> dict[str, Any]:
     return {
-        "social_performance": state.get("social_performance") or {},
-        "competitor_content": state.get("competitor_content") or {},
-        "opportunities": state.get("content_opportunities") or {},
         "strategy": state.get("content_strategy") or {},
         "platform_strategy": state.get("platform_strategy") or {},
         "content_ideas": state.get("content_ideas") or [],
-        "ninety_day_action_plan": state.get("ninety_day_action_plan") or {},
         "content_calendar": state.get("content_calendar") or {},
     }
+
+
+_PUBLIC_RESPONSE_DROP_KEYS = frozenset(
+    {
+        "social_performance",
+        "competitor_content",
+        "content_opportunities",
+        "ninety_day_action_plan",
+    }
+)
+
+_RECOMMENDATION_DROP_KEYS = frozenset(
+    {
+        "social_performance",
+        "competitor_content",
+        "opportunities",
+        "ninety_day_action_plan",
+    }
+)
+
+
+def sanitize_content_recommendation_response(payload: dict[str, Any]) -> dict[str, Any]:
+    """Strip diagnostic competitor/social/plan blocks from API-facing payloads."""
+    cleaned = {key: value for key, value in payload.items() if key not in _PUBLIC_RESPONSE_DROP_KEYS}
+    recommendation = dict(cleaned.get("recommendation") or {})
+    for key in _RECOMMENDATION_DROP_KEYS:
+        recommendation.pop(key, None)
+    if recommendation:
+        cleaned["recommendation"] = recommendation
+    else:
+        cleaned.pop("recommendation", None)
+    return cleaned

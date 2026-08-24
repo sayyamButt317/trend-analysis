@@ -8,6 +8,7 @@ from agents.scriptgenerator.Graph.script_graph import script_generator_app
 from agents.scriptgenerator.pipeline_log import log_event, log_pipeline_complete, log_pipeline_start
 from agents.scriptgenerator.schemas.script_request import ScriptGenerationRequest
 from agents.scriptgenerator.State.scriptstate import ScriptState
+from db.script_storage import save_script_generation_run
 
 
 async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, Any]:
@@ -80,7 +81,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
         content_type=content_type,
     )
 
-    return {
+    response = {
         "success": success,
         "error": error,
         "company_id": config.get("company_id") or final_state.get("company_id"),
@@ -99,5 +100,13 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
             "aspect_ratio": config["aspect_ratio"],
             "style": config["style"],
             "duration_seconds": config["duration_seconds"],
+            "status": status,
         },
     }
+
+    storage_ids = await save_script_generation_run(request, response, duration_sec=duration)
+    response["meta"]["prompt_id"] = storage_ids.get("prompt_id")
+    response["meta"]["script_id"] = storage_ids.get("script_id")
+    if storage_ids.get("storage_error"):
+        response["meta"]["storage_error"] = storage_ids["storage_error"]
+    return response

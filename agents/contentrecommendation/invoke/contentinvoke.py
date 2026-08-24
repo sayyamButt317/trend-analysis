@@ -10,7 +10,11 @@ from agents.contentrecommendation.pipeline_log import (
 )
 from agents.contentrecommendation.schemas.content_request import ContentRecommendationRequest
 from agents.contentrecommendation.state.contentstate import ContentState
-from service.ContentRecommendation.builder import build_recommendation_payload
+from db.content_recommendation_storage import save_content_recommendation_run
+from service.ContentRecommendation.builder import (
+    build_recommendation_payload,
+    sanitize_content_recommendation_response,
+)
 
 
 async def contentRecommendationAgent(request: ContentRecommendationRequest) -> dict[str, Any]:
@@ -101,29 +105,34 @@ async def contentRecommendationAgent(request: ContentRecommendationRequest) -> d
         calendar_items=len(calendar.get("items") or []),
     )
 
-    return {
-        "success": success,
-        "error": error,
-        "warning": warning,
-        "company_id": config.get("company_id") or final_state.get("company_id"),
-        "social_performance": final_state.get("social_performance") or {},
-        "competitor_content": final_state.get("competitor_content") or {},
-        "content_opportunities": final_state.get("content_opportunities") or {},
-        "content_strategy": final_state.get("content_strategy") or {},
-        "platform_strategy": final_state.get("platform_strategy") or {},
-        "content_ideas": ideas,
-        "ninety_day_action_plan": final_state.get("ninety_day_action_plan") or {},
-        "content_calendar": calendar,
-        "recommendation": recommendation,
-        "logs": final_state.get("logs") or [],
-        "meta": {
-            "duration_sec": duration,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "agent_mode": "content_recommendation",
-            "company_id": config.get("company_id"),
-            "platforms": config.get("platforms") or [],
-            "calendar_days": config.get("calendar_days"),
-            "idea_count": config.get("idea_count"),
-            "status": status,
-        },
-    }
+    response = sanitize_content_recommendation_response(
+        {
+            "success": success,
+            "error": error,
+            "warning": warning,
+            "company_id": config.get("company_id") or final_state.get("company_id"),
+            "content_strategy": final_state.get("content_strategy") or {},
+            "platform_strategy": final_state.get("platform_strategy") or {},
+            "content_ideas": ideas,
+            "content_calendar": calendar,
+            "recommendation": recommendation,
+            "logs": final_state.get("logs") or [],
+            "meta": {
+                "duration_sec": duration,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "agent_mode": "content_recommendation",
+                "company_id": config.get("company_id"),
+                "platforms": config.get("platforms") or [],
+                "calendar_days": config.get("calendar_days"),
+                "idea_count": config.get("idea_count"),
+                "status": status,
+            },
+        }
+    )
+
+    storage_ids = await save_content_recommendation_run(request, response, duration_sec=duration)
+    response["meta"]["prompt_id"] = storage_ids.get("prompt_id")
+    response["meta"]["content_recommendation_id"] = storage_ids.get("content_recommendation_id")
+    if storage_ids.get("storage_error"):
+        response["meta"]["storage_error"] = storage_ids["storage_error"]
+    return response
