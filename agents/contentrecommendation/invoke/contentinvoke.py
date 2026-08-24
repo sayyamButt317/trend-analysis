@@ -1,9 +1,7 @@
 from __future__ import annotations
-
 import time
 from datetime import datetime, timezone
 from typing import Any
-
 from agents.contentrecommendation.graph.contentgraph import content_recommendation_app
 from agents.contentrecommendation.pipeline_log import (
     log_event,
@@ -20,6 +18,7 @@ async def contentRecommendationAgent(request: ContentRecommendationRequest) -> d
     config = request.to_agent_config()
 
     log_pipeline_start(
+        company_id=config.get("company_id"),
         company=(config.get("company") or {}).get("name"),
         platforms=",".join(config.get("platforms") or []),
         calendar_days=config.get("calendar_days"),
@@ -27,6 +26,7 @@ async def contentRecommendationAgent(request: ContentRecommendationRequest) -> d
 
     initial_state: ContentState = {
         "config": config,
+        "company_id": config.get("company_id"),
         "company": config.get("company") or {},
         "company_dna": config.get("company_dna") or {},
         "company_analysis": config.get("company_analysis") or {},
@@ -105,6 +105,7 @@ async def contentRecommendationAgent(request: ContentRecommendationRequest) -> d
         "success": success,
         "error": error,
         "warning": warning,
+        "company_id": config.get("company_id") or final_state.get("company_id"),
         "social_performance": final_state.get("social_performance") or {},
         "competitor_content": final_state.get("competitor_content") or {},
         "content_opportunities": final_state.get("content_opportunities") or {},
@@ -119,6 +120,7 @@ async def contentRecommendationAgent(request: ContentRecommendationRequest) -> d
             "duration_sec": duration,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_mode": "content_recommendation",
+            "company_id": config.get("company_id"),
             "platforms": config.get("platforms") or [],
             "calendar_days": config.get("calendar_days"),
             "idea_count": config.get("idea_count"),

@@ -1,17 +1,14 @@
 from __future__ import annotations
-
-from typing import Any, Literal
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Any, Literal, Optional
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class ScriptGenerationRequest(BaseModel):
-    """Create an image or video production script from a brief or calendar suggestion."""
-
     model_config = ConfigDict(
         populate_by_name=True,
         json_schema_extra={
             "example": {
+                "company_id": "550e8400-e29b-41d4-a716-446655440000",
                 "content_type": "image",
                 "user_request": "LinkedIn carousel about AI agents for SME founders",
                 "duration_seconds": 5,
@@ -40,6 +37,13 @@ class ScriptGenerationRequest(BaseModel):
         },
     )
 
+    company_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("company_id", "companyId"),
+        serialization_alias="company_id",
+        description="External company identifier to link this script run.",
+        examples=["550e8400-e29b-41d4-a716-446655440000", "org_12345"],
+    )
     user_request: str = Field(
         default="",
         description=(
@@ -60,6 +64,14 @@ class ScriptGenerationRequest(BaseModel):
             "the content recommendation agent."
         ),
     )
+
+    @field_validator("company_id")
+    @classmethod
+    def _strip_company_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
     @model_validator(mode="after")
     def _require_brief(self) -> "ScriptGenerationRequest":
@@ -117,7 +129,12 @@ class ScriptGenerationRequest(BaseModel):
                 or style
             ).strip()
 
+        company_id = self.company_id or suggestion.get("company_id")
+        if company_id:
+            suggestion.setdefault("company_id", company_id)
+
         return {
+            "company_id": company_id,
             "user_request": brief,
             "content_type": content_type,
             "duration_seconds": duration,

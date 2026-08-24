@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 from typing import Any, TypedDict
 
-
 class ContentState(TypedDict, total=False):
-    """State for the content recommendation LangGraph."""
-
     config: dict[str, Any]
+    company_id: str | None
     company: dict[str, Any]
     company_dna: dict[str, Any]
     company_analysis: dict[str, Any]

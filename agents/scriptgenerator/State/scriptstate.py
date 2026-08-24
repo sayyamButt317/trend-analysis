@@ -65,6 +65,7 @@ class Scene(BaseModel):
 
 
 class ScriptState(TypedDict, total=False):
+    company_id: str | None
     user_request: str
     content_type: str
     content_suggestion: dict[str, Any]

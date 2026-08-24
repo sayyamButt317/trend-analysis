@@ -64,6 +64,7 @@ async def GeminiImageGeneratorNode(state: ImageState) -> ImageState:
                 return_base64=return_base64,
                 save_local=save_local,
                 upload_s3=upload_s3,
+                company_id=state.get("company_id"),
             )
             row = {
                 "job_id": job.get("job_id"),
@@ -77,6 +78,7 @@ async def GeminiImageGeneratorNode(state: ImageState) -> ImageState:
                 "bytes": saved.get("bytes"),
                 "model": saved["model"],
                 "aspect_ratio": saved["aspect_ratio"],
+                "company_id": state.get("company_id"),
             }
             if saved.get("url"):
                 row["url"] = saved["url"]

@@ -1,7 +1,6 @@
 import time
 from datetime import datetime, timezone
 from typing import Any
-
 from agents.trend.graph.trendgraph import trend_graph_app
 from agents.trend.schemas.trend_request import GlobalTrendRequest
 from agents.trend.services.trend_response import build_trend_response

@@ -192,33 +192,40 @@ def _build_generation_payload(item: dict[str, Any]) -> dict[str, Any]:
         f"{_platform_label(item.get('platform'))} about {title}. "
         f"Hook: {item.get('hook') or ''}. Goal: {item.get('goal') or 'Authority'}."
     )
-    return {
+    company_id = item.get("company_id")
+    suggestion = {
+        "platform": item.get("platform"),
+        "format": item.get("format"),
+        "pillar": item.get("pillar"),
+        "topic": item.get("topic"),
+        "goal": item.get("goal"),
+        "title": item.get("title"),
+        "hook": item.get("hook"),
+        "caption": item.get("caption"),
+        "cta": item.get("cta"),
+        "key_points": item.get("key_points") or [],
+        "hashtags": item.get("hashtags") or [],
+        "target_audience": item.get("target_audience"),
+        "visual_direction": item.get("visual_direction"),
+        "image_prompt": item.get("image_prompt"),
+        "slides": item.get("slides") or [],
+        "script_brief": item.get("script_brief"),
+        "phase": item.get("phase"),
+        "date": item.get("date"),
+    }
+    if company_id:
+        suggestion["company_id"] = company_id
+    payload: dict[str, Any] = {
         "content_type": media_type,
         "user_request": brief,
         "duration_seconds": int(item.get("duration_seconds") or (30 if media_type == "video" else 5)),
         "aspect_ratio": item.get("aspect_ratio") or "1:1",
         "style": item.get("visual_style") or "clean professional social content",
-        "content_suggestion": {
-            "platform": item.get("platform"),
-            "format": item.get("format"),
-            "pillar": item.get("pillar"),
-            "topic": item.get("topic"),
-            "goal": item.get("goal"),
-            "title": item.get("title"),
-            "hook": item.get("hook"),
-            "caption": item.get("caption"),
-            "cta": item.get("cta"),
-            "key_points": item.get("key_points") or [],
-            "hashtags": item.get("hashtags") or [],
-            "target_audience": item.get("target_audience"),
-            "visual_direction": item.get("visual_direction"),
-            "image_prompt": item.get("image_prompt"),
-            "slides": item.get("slides") or [],
-            "script_brief": item.get("script_brief"),
-            "phase": item.get("phase"),
-            "date": item.get("date"),
-        },
+        "content_suggestion": suggestion,
     }
+    if company_id:
+        payload["company_id"] = company_id
+    return payload
 
 
 def _normalize_item(
@@ -231,6 +238,7 @@ def _normalize_item(
     ideas: list[dict[str, Any]],
     plan: dict[str, Any],
     company: dict[str, Any] | None = None,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
     day = start + timedelta(days=offset)
     phase = _phase_for_offset(offset)
@@ -239,6 +247,14 @@ def _normalize_item(
     idea = ideas[offset % len(ideas)] if ideas else {}
     pillar_row = pillars[offset % len(pillars)] if pillars else {}
     company = company or {}
+    resolved_company_id = (
+        company_id
+        or company.get("company_id")
+        or company.get("id")
+        or raw.get("company_id")
+    )
+    if resolved_company_id:
+        resolved_company_id = str(resolved_company_id).strip() or None
 
     platform = (
         raw.get("platform")
@@ -375,6 +391,7 @@ def _normalize_item(
         "goal": goal,
         "phase": raw.get("phase") or phase,
         "media_type": media_type,
+        "company_id": resolved_company_id,
         "title": title[:160],
         "hook": hook[:280],
         "caption": caption[:1200],
@@ -453,6 +470,7 @@ def build_fallback_calendar(
     calendar_days: int = 90,
     skip_weekends: bool = True,
     company: dict[str, Any] | None = None,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
     plan = ninety_day_plan or {}
     pillars = ((content_strategy or {}).get("strategy") or {}).get("content_pillars") or []
@@ -470,6 +488,7 @@ def build_fallback_calendar(
             ideas=content_ideas or [],
             plan=plan,
             company=company,
+            company_id=company_id,
         )
         for offset in offsets
     ]
@@ -638,6 +657,14 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
     calendar_days = max(3, min(int(analysis_input["calendar_days"]), 90))
     analysis_input["calendar_days"] = calendar_days
     company = analysis_input.get("company") or {}
+    company_id = (
+        data.get("company_id")
+        or analysis_input.get("company_id")
+        or company.get("company_id")
+        or company.get("id")
+    )
+    if company_id:
+        company_id = str(company_id).strip() or None
 
     platforms = [
         str(p).strip().lower()
@@ -653,6 +680,7 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
         calendar_days=calendar_days,
         skip_weekends=True,
         company=company,
+        company_id=company_id,
     )
 
     try:
@@ -709,6 +737,7 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
                     ideas=ideas,
                     plan=plan,
                     company=company,
+                    company_id=company_id,
                 )
             )
 
@@ -744,6 +773,7 @@ async def GenerateContentCalendarNode(state: ContentState) -> ContentState:
 
         data = {
             "company": state.get("company") or config.get("company") or {},
+            "company_id": state.get("company_id") or config.get("company_id"),
             "company_dna": state.get("company_dna") or config.get("company_dna") or {},
             "business_goals": (
                 state.get("business_goals")

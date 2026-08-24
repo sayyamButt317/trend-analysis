@@ -1,8 +1,6 @@
 from __future__ import annotations
-
-from typing import Any, Literal
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Any, Literal, Optional
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Platform = Literal["instagram", "linkedin", "facebook", "tiktok", "x", "twitter"]
 Purpose = Literal["story", "post", "carousel"]
@@ -33,6 +31,7 @@ class ImageGenerationRequest(BaseModel):
         populate_by_name=True,
         json_schema_extra={
             "example": {
+                "company_id": "550e8400-e29b-41d4-a716-446655440000",
                 "platform": "instagram",
                 "purpose": "carousel",
                 "style": "clean modern social graphic",
@@ -56,6 +55,13 @@ class ImageGenerationRequest(BaseModel):
         },
     )
 
+    company_id: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("company_id", "companyId"),
+        serialization_alias="company_id",
+        description="External company identifier to link generated assets.",
+        examples=["550e8400-e29b-41d4-a716-446655440000", "org_12345"],
+    )
     platform: Platform = Field(..., description="Target social platform.")
     purpose: Purpose = Field(
         ...,
@@ -98,6 +104,14 @@ class ImageGenerationRequest(BaseModel):
         description="Deprecated. Use return_base64 instead.",
     )
 
+    @field_validator("company_id")
+    @classmethod
+    def _strip_company_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
     @model_validator(mode="after")
     def _require_visual_source(self) -> "ImageGenerationRequest":
         has_scenes = bool(self.scenes)
@@ -120,10 +134,20 @@ class ImageGenerationRequest(BaseModel):
         return _PURPOSE_ASPECT.get((platform, purpose), "1:1")
 
     def to_agent_config(self) -> dict[str, Any]:
+        project = dict(self.project or {})
+        company_id = (
+            self.company_id
+            or project.get("company_id")
+            or project.get("id")
+        )
+        if company_id:
+            project.setdefault("company_id", company_id)
+
         return {
+            "company_id": company_id,
             "platform": str(self.platform).lower(),
             "purpose": str(self.purpose).lower(),
-            "project": dict(self.project or {}),
+            "project": project,
             "script": dict(self.script or {}),
             "characters": list(self.characters or []),
             "scenes": list(self.scenes or []),

@@ -1,5 +1,4 @@
 import logging
-
 from agents.trend.services.web_trend_crawler import crawl_instagram_web_trends
 from agents.trend.state.trend_state import TrendState
 

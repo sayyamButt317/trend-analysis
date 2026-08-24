@@ -146,9 +146,8 @@ async def generate_image_asset(
     return_base64: bool = False,
     save_local: bool = False,
     upload_s3: bool = True,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
-
-
     result = await generate_image_bytes(
         prompt,
         aspect_ratio=aspect_ratio,
@@ -165,6 +164,7 @@ async def generate_image_asset(
         "model": result["model"],
         "aspect_ratio": result["aspect_ratio"],
         "bytes": len(result["bytes"]),
+        "company_id": company_id,
     }
 
     if return_base64:
@@ -181,6 +181,7 @@ async def generate_image_asset(
             result["bytes"],
             filename=filename,
             content_type=mime,
+            company_id=company_id,
         )
         payload["url"] = uploaded["url"]
         payload["s3_url"] = uploaded["s3_url"]
@@ -220,6 +221,7 @@ async def generate_and_save_image(
     return_base64: bool = False,
     save_local: bool = False,
     upload_s3: bool = True,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
     asset = await generate_image_asset(
         prompt,
@@ -229,6 +231,7 @@ async def generate_and_save_image(
         return_base64=return_base64 or include_data_url,
         save_local=save_local,
         upload_s3=upload_s3,
+        company_id=company_id,
     )
     if include_data_url and asset.get("image_base64"):
         asset["data_url"] = f"data:{asset['mime_type']};base64,{asset['image_base64']}"

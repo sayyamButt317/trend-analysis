@@ -19,6 +19,7 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
     config = request.to_agent_config()
 
     log_pipeline_start(
+        company_id=config.get("company_id"),
         platform=config["platform"],
         purpose=config["purpose"],
         aspect_ratio=config["aspect_ratio"],
@@ -27,6 +28,7 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
     )
 
     initial_state: ImageState = {
+        "company_id": config.get("company_id"),
         "platform": config["platform"],
         "purpose": config["purpose"],
         "style": config["style"],
@@ -58,6 +60,7 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
                 "duration_sec": duration,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "agent_mode": "image_generation",
+                "company_id": config.get("company_id"),
                 "platform": config["platform"],
                 "purpose": config["purpose"],
             },
@@ -87,6 +90,7 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
     return {
         "success": success,
         "error": error,
+        "company_id": config.get("company_id") or final_state.get("company_id"),
         "platform": config["platform"],
         "purpose": config["purpose"],
         "aspect_ratio": config["aspect_ratio"],
@@ -99,6 +103,7 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
             "duration_sec": duration,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_mode": "image_generation",
+            "company_id": config.get("company_id"),
             "platform": config["platform"],
             "purpose": config["purpose"],
             "aspect_ratio": config["aspect_ratio"],

@@ -2,7 +2,6 @@ from __future__ import annotations
 import re
 from collections import Counter
 from typing import Any
-
 from service.Competitor.competitor_intelligence_report import (
     _service_terms,
     _technology_terms,

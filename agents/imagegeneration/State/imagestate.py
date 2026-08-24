@@ -1,9 +1,9 @@
 from __future__ import annotations
-
 from typing import Any, TypedDict
 
 
 class ImageState(TypedDict, total=False):
+    company_id: str | None
     platform: str
     purpose: str
     style: str

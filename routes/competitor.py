@@ -1,5 +1,4 @@
 from fastapi import APIRouter, HTTPException, Query, status
-
 from agents.competitor.invoke.competitor_invoke import competitorAnalysisAgent
 from agents.competitor.jobs import create_competitor_job, get_competitor_job
 from agents.trend.schemas.competitor_request import CompetitorAnalysisRequest

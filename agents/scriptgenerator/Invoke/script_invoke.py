@@ -16,6 +16,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
     content_type = config["content_type"]
 
     log_pipeline_start(
+        company_id=config.get("company_id"),
         user_request=config["user_request"],
         content_type=content_type,
         duration_seconds=config["duration_seconds"],
@@ -24,6 +25,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
     )
 
     initial_state: ScriptState = {
+        "company_id": config.get("company_id"),
         "user_request": config["user_request"],
         "content_type": content_type,
         "content_suggestion": config.get("content_suggestion") or {},
@@ -51,6 +53,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
                 "duration_sec": duration,
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "agent_mode": "script_generation",
+                "company_id": config.get("company_id"),
                 "content_type": content_type,
             },
         }
@@ -80,6 +83,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
     return {
         "success": success,
         "error": error,
+        "company_id": config.get("company_id") or final_state.get("company_id"),
         "content_type": content_type,
         "project": final_state.get("project") or {},
         "script": final_state.get("script") or {},
@@ -90,6 +94,7 @@ async def scriptGenerationAgent(request: ScriptGenerationRequest) -> dict[str, A
             "duration_sec": duration,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "agent_mode": "script_generation",
+            "company_id": config.get("company_id"),
             "content_type": content_type,
             "aspect_ratio": config["aspect_ratio"],
             "style": config["style"],

@@ -1,6 +1,5 @@
 import asyncio
 import logging
-
 from agents.trend.services.instagramuser_details import (
     ExtractInfluencerDetailsFromInstagram,
     InstagramRateLimitError,

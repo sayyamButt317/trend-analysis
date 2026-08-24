@@ -56,6 +56,7 @@ def upload_bytes_to_s3(
     filename: str,
     content_type: str = "image/png",
     prefix: str | None = None,
+    company_id: str | None = None,
 ) -> dict[str, Any]:
     if not s3_configured():
         raise RuntimeError(
@@ -71,6 +72,9 @@ def upload_bytes_to_s3(
         else (getattr(config, "AWS_S3_PREFIX", None) or "generated-images")
     )
     folder = str(folder).strip().strip("/")
+    company = _safe_key_part(str(company_id or "").strip()) if company_id else ""
+    if company:
+        folder = f"{folder}/{company}" if folder else company
     unique = uuid4().hex[:10]
     key = f"{folder}/{_safe_key_part(filename)}" if folder else _safe_key_part(filename)
     # Avoid collisions when filename repeats across runs.
