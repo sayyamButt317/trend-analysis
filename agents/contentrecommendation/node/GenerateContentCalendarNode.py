@@ -1,9 +1,7 @@
 from __future__ import annotations
-
 import logging
 from datetime import date, timedelta
 from typing import Any
-
 from agents.contentrecommendation.state.contentstate import ContentState
 from service.Competitor.openai_client import (
     chat_completion_json,
@@ -382,8 +380,8 @@ def _normalize_item(
 
     item = {
         "id": f"cal-{day.isoformat()}-{platform}-{offset}",
-        "day": raw.get("day") or _DAYS[day.weekday()],
-        "date": raw.get("date") or day.isoformat(),
+        "day": _DAYS[day.weekday()],
+        "date": day.isoformat(),
         "platform": platform,
         "format": fmt,
         "pillar": pillar,
@@ -434,14 +432,59 @@ def _build_table(items: list[dict[str, Any]]) -> list[dict[str, str]]:
     ]
 
 
-def _weekday_offsets(calendar_days: int, *, skip_weekends: bool) -> list[int]:
+def _calendar_start() -> date:
+    return date.today()
+
+
+def _plan_end_date(start: date, calendar_days: int) -> date:
+    return start + timedelta(days=max(calendar_days - 1, 0))
+
+
+def _calendar_meta(start: date, calendar_days: int, *, skip_weekends: bool) -> dict[str, Any]:
+    return {
+        "days": calendar_days,
+        "start_date": start.isoformat(),
+        "end_date": _plan_end_date(start, calendar_days).isoformat(),
+        "skip_weekends": skip_weekends,
+    }
+
+
+def _weekday_offsets(
+    calendar_days: int,
+    *,
+    skip_weekends: bool,
+    start: date | None = None,
+) -> list[int]:
+    anchor = start or _calendar_start()
     if not skip_weekends:
         return list(range(calendar_days))
     offsets: list[int] = []
     for offset in range(calendar_days):
-        if (date.today() + timedelta(days=offset)).weekday() < 5:
+        if (anchor + timedelta(days=offset)).weekday() < 5:
             offsets.append(offset)
     return offsets or list(range(min(calendar_days, 5)))
+
+
+def _resolve_item_offset(
+    raw: dict[str, Any],
+    *,
+    index: int,
+    start: date,
+    calendar_days: int,
+    scheduled_offsets: list[int],
+) -> int:
+    if raw.get("date"):
+        try:
+            parsed = date.fromisoformat(str(raw["date"])[:10])
+            if parsed >= start:
+                offset = (parsed - start).days
+                if 0 <= offset < calendar_days:
+                    return offset
+        except ValueError:
+            pass
+    if index < len(scheduled_offsets):
+        return scheduled_offsets[index]
+    return min(index, max(calendar_days - 1, 0))
 
 
 def _group_phases(items: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -475,8 +518,8 @@ def build_fallback_calendar(
     plan = ninety_day_plan or {}
     pillars = ((content_strategy or {}).get("strategy") or {}).get("content_pillars") or []
     requested = [p.lower() for p in (platforms or list(_DEFAULT_PLATFORMS)) if p]
-    start = date.today()
-    offsets = _weekday_offsets(calendar_days, skip_weekends=skip_weekends)
+    start = _calendar_start()
+    offsets = _weekday_offsets(calendar_days, skip_weekends=skip_weekends, start=start)
 
     items = [
         _normalize_item(
@@ -492,10 +535,9 @@ def build_fallback_calendar(
         )
         for offset in offsets
     ]
+    meta = _calendar_meta(start, calendar_days, skip_weekends=skip_weekends)
     return {
-        "days": calendar_days,
-        "start_date": start.isoformat(),
-        "skip_weekends": skip_weekends,
+        **meta,
         "source_plan_summary": plan.get("summary"),
         "phases": _group_phases(items),
         "items": items,
@@ -526,13 +568,25 @@ def _build_calendar_input(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_prompt(analysis_input: dict[str, Any]) -> str:
+def _build_prompt(analysis_input: dict[str, Any], *, start: date) -> str:
     calendar_days = analysis_input["calendar_days"]
+    end = _plan_end_date(start, calendar_days)
     return f"""
 You are a senior content operations strategist.
 
 Turn the 90-day action plan into a DETAILED content calendar that a downstream
 image/video generation agent can execute without guessing.
+
+==================================================
+SCHEDULE ANCHOR
+==================================================
+
+Today / plan start: {start.isoformat()} ({_DAYS[start.weekday()]})
+Plan end: {end.isoformat()}
+Calendar length: {calendar_days} days
+
+All item dates MUST be on or after {start.isoformat()} and on or before {end.isoformat()}.
+Do not use past dates. The first recommended posts should begin from today onward.
 
 ==================================================
 COMPANY
@@ -592,9 +646,9 @@ PLATFORMS
 RULES
 ==================================================
 
-1. Build a posting calendar for the next {calendar_days} calendar days.
-2. Prefer weekdays (Mon-Fri).
-3. Map each item to the matching 90-day phase (0-30 / 31-60 / 61-90).
+1. Build a posting calendar for the next {calendar_days} calendar days starting {start.isoformat()}.
+2. Prefer weekdays (Mon-Fri); skip weekends unless needed to hit volume.
+3. Map each item to the matching 90-day phase (0-30 / 31-60 / 61-90) relative to {start.isoformat()}.
 4. Every item must be production-ready for image OR video generation.
 5. Set media_type:
    - "video" for Reel / Video / Story motion
@@ -615,7 +669,7 @@ Return ONLY valid JSON:
   "items": [
     {{
       "day": "Mon",
-      "date": "YYYY-MM-DD",
+      "date": "{start.isoformat()}",
       "platform": "linkedin",
       "format": "Carousel",
       "pillar": "AI Education",
@@ -683,6 +737,13 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
         company_id=company_id,
     )
 
+    start = _calendar_start()
+    scheduled_offsets = _weekday_offsets(
+        calendar_days,
+        skip_weekends=True,
+        start=start,
+    )
+
     try:
         response = await chat_completion_json(
             model=resolve_openai_model(),
@@ -692,12 +753,13 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
                     "content": (
                         "You are a content calendar planner for an image/video production pipeline. "
                         "Every calendar item must include production details a script generator "
-                        "can turn into image slides or a video script. Return JSON only."
+                        "can turn into image slides or a video script. Schedule all dates from "
+                        f"today ({start.isoformat()}) forward only. Return JSON only."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": _build_prompt(analysis_input),
+                    "content": _build_prompt(analysis_input, start=start),
                 },
             ],
             temperature=0.35,
@@ -707,7 +769,6 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(raw_items, list) or not raw_items:
             return fallback
 
-        start = date.today()
         pillars = (
             ((analysis_input.get("content_strategy") or {}).get("strategy") or {}).get(
                 "content_pillars"
@@ -721,16 +782,17 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
         for index, raw in enumerate(raw_items):
             if not isinstance(raw, dict):
                 continue
-            offset = index
-            if raw.get("date"):
-                try:
-                    offset = max(0, (date.fromisoformat(str(raw["date"])) - start).days)
-                except ValueError:
-                    offset = index
+            offset = _resolve_item_offset(
+                raw,
+                index=index,
+                start=start,
+                calendar_days=calendar_days,
+                scheduled_offsets=scheduled_offsets,
+            )
             items.append(
                 _normalize_item(
                     raw,
-                    offset=min(offset, calendar_days - 1),
+                    offset=offset,
                     start=start,
                     platforms=platforms,
                     pillars=pillars if isinstance(pillars, list) else [],
@@ -744,10 +806,10 @@ async def generate_content_calendar(data: dict[str, Any]) -> dict[str, Any]:
         if not items:
             return fallback
 
+        items.sort(key=lambda row: (row.get("date") or "", row.get("platform") or ""))
+        meta = _calendar_meta(start, calendar_days, skip_weekends=True)
         return {
-            "days": calendar_days,
-            "start_date": start.isoformat(),
-            "skip_weekends": True,
+            **meta,
             "source_plan_summary": plan.get("summary"),
             "phases": _group_phases(items),
             "items": items,

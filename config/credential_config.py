@@ -82,6 +82,9 @@ class Config(BaseModel):
     SUPABASE_TABLE_SCRIPT: str = Field(
         default=os.getenv("SUPABASE_TABLE_SCRIPT") or "script"
     )
+    SUPABASE_TABLE_IMAGES: str = Field(
+        default=os.getenv("SUPABASE_TABLE_IMAGES") or "images"
+    )
     FIRECRAWL_API_KEY: str = Field(default=os.getenv("FIRECRAWL_API_KEY"))
 
     HIGGSFIELD_API_KEY: str = Field(
@@ -126,6 +129,7 @@ class Config(BaseModel):
         default=os.getenv("AWS_S3_CDN_URL") or "",
         description="Optional CloudFront/base CDN URL. If set, returned image URLs use it.",
     )
+    
 
 config = Config()
 

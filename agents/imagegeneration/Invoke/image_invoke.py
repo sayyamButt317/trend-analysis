@@ -12,6 +12,7 @@ from agents.imagegeneration.pipeline_log import (
 )
 from agents.imagegeneration.schemas.image_request import ImageGenerationRequest
 from agents.imagegeneration.State.imagestate import ImageState
+from db.images_storage import save_image_generation_run
 
 
 async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any]:
@@ -87,7 +88,7 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
     )
     log_event("9_complete", "Result summary", success=success, images=len(images))
 
-    return {
+    response = {
         "success": success,
         "error": error,
         "company_id": config.get("company_id") or final_state.get("company_id"),
@@ -111,3 +112,10 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
             "status": status,
         },
     }
+
+    storage_ids = await save_image_generation_run(request, response, duration_sec=duration)
+    response["meta"]["prompt_id"] = storage_ids.get("prompt_id")
+    response["meta"]["images_id"] = storage_ids.get("images_id")
+    if storage_ids.get("storage_error"):
+        response["meta"]["storage_error"] = storage_ids["storage_error"]
+    return response
