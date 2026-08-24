@@ -1,7 +1,5 @@
 from __future__ import annotations
-
 import logging
-
 from agents.contentrecommendation.state.contentstate import ContentState
 from service.ContentRecommendation.builder import build_competitor_content
 

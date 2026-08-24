@@ -1,7 +1,6 @@
 import asyncio
 import logging
 from typing import Any
-
 from agents.analyzecompany.schemas.company_request import AnalyzeCompanyRequest
 from config.credential_config import config, resolve_supabase_api_key
 from db.connection import get_supabase

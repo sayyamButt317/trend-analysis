@@ -2,14 +2,12 @@ import logging
 import sys
 import asyncio
 from contextlib import asynccontextmanager
-
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.security import HTTPBearer
 from fastapi.staticfiles import StaticFiles
-
 from core.exception_handlers import register_exception_handlers
 from routes import api_router
 from service.ImageGeneration.gemini_image import generated_images_dir
@@ -87,11 +85,8 @@ async def health_check():
 
 app.include_router(api_router)
 
-# Local/dev only. Vercel (and most serverless) has a read-only package FS,
-# so never create/mount media dirs at import time there.
 _media_dir = generated_images_dir(create=False)
 if _media_dir is None:
-    # Attempt /tmp for local-like writable mounts; skip if still unavailable.
     _media_dir = generated_images_dir(create=True)
 
 if _media_dir is not None:
