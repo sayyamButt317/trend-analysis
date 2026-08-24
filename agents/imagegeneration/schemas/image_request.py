@@ -79,11 +79,12 @@ class ImageGenerationRequest(BaseModel):
         description="If false, only build prompts (no Gemini calls).",
     )
     return_base64: bool = Field(
+        default=False,
+        description="If true, also include image_base64 in the JSON response.",
+    )
+    upload_s3: bool = Field(
         default=True,
-        description=(
-            "Production default. Include image_base64 in the JSON response "
-            "so the frontend can render without server disk storage."
-        ),
+        description="Upload each still to AWS S3 and return url/s3_url (production default).",
     )
     save_local: bool = Field(
         default=False,
@@ -131,5 +132,6 @@ class ImageGenerationRequest(BaseModel):
             "max_images": int(self.max_images),
             "generate_media": bool(self.generate_media),
             "return_base64": bool(self.return_base64 or self.include_data_url),
+            "upload_s3": bool(self.upload_s3),
             "save_local": bool(self.save_local),
         }

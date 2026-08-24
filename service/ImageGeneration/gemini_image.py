@@ -1,19 +1,19 @@
 from __future__ import annotations
-
 import base64
 import logging
 import re
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
-
 import httpx
-
 from config.credential_config import config
+import asyncio
+from service.ImageGeneration.s3_upload import s3_configured, upload_bytes_to_s3
 
 logger = logging.getLogger(__name__)
 
-_GENERATED_DIR = Path(__file__).resolve().parents[2] / "generated" / "images"
+_PROJECT_GENERATED_DIR = Path(__file__).resolve().parents[2] / "generated" / "images"
 _PUBLIC_PREFIX = "/media/images"
 _ASPECT_MAP = {
     "1:1": "1:1",
@@ -24,9 +24,29 @@ _ASPECT_MAP = {
 }
 
 
-def generated_images_dir() -> Path:
-    _GENERATED_DIR.mkdir(parents=True, exist_ok=True)
-    return _GENERATED_DIR
+def _is_writable_dir(path: Path) -> bool:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".write_probe"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
+def generated_images_dir(*, create: bool = True) -> Path | None:
+    candidates = [
+        _PROJECT_GENERATED_DIR,
+        Path(tempfile.gettempdir()) / "trend-generated-images",
+    ]
+    for candidate in candidates:
+        if create:
+            if _is_writable_dir(candidate):
+                return candidate
+        elif candidate.exists():
+            return candidate
+    return None
 
 
 def public_image_url(filename: str) -> str:
@@ -60,10 +80,6 @@ async def generate_image_bytes(
     model: str | None = None,
     timeout: float = 180,
 ) -> dict[str, Any]:
-    """
-    Generate one still via Gemini generateContent.
-    Returns {mime_type, data_b64, bytes} or raises on failure.
-    """
     api_key = (config.GEMINI_API_KEY or "").strip().strip('"').strip("'")
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured")
@@ -127,15 +143,12 @@ async def generate_image_asset(
     aspect_ratio: str = "1:1",
     filename_stem: str = "image",
     model: str | None = None,
-    return_base64: bool = True,
+    return_base64: bool = False,
     save_local: bool = False,
+    upload_s3: bool = True,
 ) -> dict[str, Any]:
-    """
-    Generate an image and package it for API response.
 
-    Production default: return_base64=True, save_local=False
-    (image bytes travel in the JSON response — no server disk required).
-    """
+
     result = await generate_image_bytes(
         prompt,
         aspect_ratio=aspect_ratio,
@@ -155,15 +168,43 @@ async def generate_image_asset(
     }
 
     if return_base64:
-        # Frontend: `data:${mime_type};base64,${image_base64}`
         payload["image_base64"] = result["data_b64"]
 
+    if upload_s3:
+        if not s3_configured():
+            raise RuntimeError(
+                "upload_s3=true but AWS S3 is not configured "
+                "(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_REGION, AWS_S3_BUCKET_NAME)."
+            )
+        uploaded = await asyncio.to_thread(
+            upload_bytes_to_s3,
+            result["bytes"],
+            filename=filename,
+            content_type=mime,
+        )
+        payload["url"] = uploaded["url"]
+        payload["s3_url"] = uploaded["s3_url"]
+        payload["s3_key"] = uploaded["key"]
+        payload["s3_bucket"] = uploaded["bucket"]
+
     if save_local:
-        out_dir = generated_images_dir()
-        path = out_dir / filename
-        path.write_bytes(result["bytes"])
-        payload["path"] = str(path)
-        payload["url"] = public_image_url(filename)
+        out_dir = generated_images_dir(create=True)
+        if out_dir is None:
+            logger.warning(
+                "save_local requested but no writable directory is available "
+                "(serverless/read-only FS)."
+            )
+            if not payload.get("image_base64") and not payload.get("url"):
+                payload["image_base64"] = result["data_b64"]
+        else:
+            path = out_dir / filename
+            path.write_bytes(result["bytes"])
+            payload["path"] = str(path)
+            payload.setdefault("url", public_image_url(filename))
+
+    if not payload.get("url") and not payload.get("image_base64"):
+        # Safety net so the client always gets something usable.
+        payload["image_base64"] = result["data_b64"]
 
     return payload
 
@@ -176,8 +217,9 @@ async def generate_and_save_image(
     filename_stem: str = "image",
     model: str | None = None,
     include_data_url: bool = False,
-    return_base64: bool = True,
+    return_base64: bool = False,
     save_local: bool = False,
+    upload_s3: bool = True,
 ) -> dict[str, Any]:
     asset = await generate_image_asset(
         prompt,
@@ -186,6 +228,7 @@ async def generate_and_save_image(
         model=model,
         return_base64=return_base64 or include_data_url,
         save_local=save_local,
+        upload_s3=upload_s3,
     )
     if include_data_url and asset.get("image_base64"):
         asset["data_url"] = f"data:{asset['mime_type']};base64,{asset['image_base64']}"

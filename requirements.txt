@@ -29,3 +29,6 @@ aiofiles>=23.0.0
 
 # Video generation
 higgsfield-client>=0.1.0
+
+# AWS S3 uploads
+boto3>=1.34.0

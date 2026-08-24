@@ -7,6 +7,7 @@ from service.ImageGeneration.gemini_image import (
     public_image_url,
     resolve_gemini_image_model,
 )
+from service.ImageGeneration.s3_upload import s3_configured, upload_bytes_to_s3
 
 __all__ = [
     "gemini_image_configured",
@@ -16,4 +17,6 @@ __all__ = [
     "generated_images_dir",
     "public_image_url",
     "resolve_gemini_image_model",
+    "s3_configured",
+    "upload_bytes_to_s3",
 ]

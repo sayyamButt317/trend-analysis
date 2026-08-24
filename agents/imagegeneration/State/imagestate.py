@@ -11,6 +11,7 @@ class ImageState(TypedDict, total=False):
     max_images: int
     generate_media: bool
     return_base64: bool
+    upload_s3: bool
     save_local: bool
     project: dict[str, Any]
     script: dict[str, Any]

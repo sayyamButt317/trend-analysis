@@ -2,6 +2,7 @@ import logging
 import sys
 import asyncio
 from contextlib import asynccontextmanager
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -85,11 +86,29 @@ async def health_check():
 
 
 app.include_router(api_router)
-app.mount(
-    "/media/images",
-    StaticFiles(directory=str(generated_images_dir())),
-    name="generated_images",
-)
+
+# Local/dev only. Vercel (and most serverless) has a read-only package FS,
+# so never create/mount media dirs at import time there.
+_media_dir = generated_images_dir(create=False)
+if _media_dir is None:
+    # Attempt /tmp for local-like writable mounts; skip if still unavailable.
+    _media_dir = generated_images_dir(create=True)
+
+if _media_dir is not None:
+    try:
+        app.mount(
+            "/media/images",
+            StaticFiles(directory=str(_media_dir)),
+            name="generated_images",
+        )
+        logger.info("Mounted local media at /media/images -> %s", _media_dir)
+    except Exception:
+        logger.exception("Skipping /media/images mount")
+else:
+    logger.info(
+        "Skipping /media/images mount (read-only FS). "
+        "Use return_base64=true for production image responses."
+    )
 
 
 if __name__ == "__main__":
