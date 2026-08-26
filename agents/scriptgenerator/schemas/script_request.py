@@ -65,6 +65,16 @@ class ScriptGenerationRequest(BaseModel):
         ),
     )
 
+    @field_validator("content_type", mode="before")
+    @classmethod
+    def _normalize_content_type(cls, value: Any) -> str:
+        text = str(value or "video").strip().lower()
+        if text in {"carousel", "post", "story", "static", "document", "image", "still"}:
+            return "image"
+        if text in {"video", "reel", "reels", "short", "shorts", "motion"}:
+            return "video"
+        return text
+
     @field_validator("company_id")
     @classmethod
     def _strip_company_id(cls, value: str | None) -> str | None:
@@ -93,6 +103,10 @@ class ScriptGenerationRequest(BaseModel):
         content_type = self.content_type
         if suggestion.get("media_type") in {"image", "video"}:
             content_type = str(suggestion["media_type"])
+        elif suggestion.get("content_type"):
+            normalized = ScriptGenerationRequest._normalize_content_type(suggestion.get("content_type"))
+            if normalized in {"image", "video"}:
+                content_type = normalized
         elif suggestion.get("format"):
             fmt = str(suggestion.get("format") or "").lower()
             if any(token in fmt for token in ("reel", "video", "story", "short")):
