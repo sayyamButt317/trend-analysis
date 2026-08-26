@@ -110,8 +110,16 @@ async def imageGenerationAgent(request: ImageGenerationRequest) -> dict[str, Any
             "aspect_ratio": config["aspect_ratio"],
             "style": config["style"],
             "status": status,
+            "images_count": len(images),
+            "jobs_count": len(jobs),
         },
     }
+
+    if config["purpose"] == "carousel" and len(images) == 1:
+        response["meta"]["warning"] = (
+            "Carousel generated 1 slide. Pass all scenes from POST /script-generation/script "
+            "(or include script.slides / project.slides) for a multi-slide carousel."
+        )
 
     storage_ids = await save_image_generation_run(request, response, duration_sec=duration)
     response["meta"]["prompt_id"] = storage_ids.get("prompt_id")

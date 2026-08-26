@@ -117,6 +117,15 @@ class Config(BaseModel):
         default=os.getenv("GEMINI_IMAGE_MODEL") or "gemini-2.5-flash-image",
         description="Gemini model used for still image generation.",
     )
+    GEMINI_IMAGE_MODEL_FALLBACKS: str = Field(
+        default=os.getenv("GEMINI_IMAGE_MODEL_FALLBACKS")
+        or "gemini-2.0-flash-preview-image-generation",
+        description="Comma-separated fallback Gemini image models when the primary is unavailable.",
+    )
+    GEMINI_IMAGE_MAX_RETRIES: int = Field(
+        default=int(os.getenv("GEMINI_IMAGE_MAX_RETRIES", "3")),
+        description="Retry count per model for transient Gemini errors (503/429/5xx).",
+    )
     AWS_ACCESS_KEY_ID: str = Field(default=os.getenv("AWS_ACCESS_KEY_ID"))
     AWS_SECRET_ACCESS_KEY: str = Field(default=os.getenv("AWS_SECRET_ACCESS_KEY"))
     AWS_S3_REGION: str = Field(default=os.getenv("AWS_S3_REGION") or os.getenv("AWS_REGION"))
@@ -124,10 +133,6 @@ class Config(BaseModel):
     AWS_S3_PREFIX: str = Field(
         default=os.getenv("AWS_S3_PREFIX") or "generated-images",
         description="Folder/prefix inside the S3 bucket for generated assets.",
-    )
-    AWS_S3_CDN_URL: str = Field(
-        default=os.getenv("AWS_S3_CDN_URL") or "",
-        description="Optional CloudFront/base CDN URL. If set, returned image URLs use it.",
     )
     
 

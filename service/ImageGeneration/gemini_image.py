@@ -22,6 +22,8 @@ _ASPECT_MAP = {
     "3:4": "3:4",
     "4:3": "4:3",
 }
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+_RETRY_DELAYS_SEC = (2.0, 5.0, 10.0)
 
 
 def _is_writable_dir(path: Path) -> bool:
@@ -64,6 +66,69 @@ def resolve_gemini_image_model(model: str | None = None) -> str:
     return value or "gemini-2.5-flash-image"
 
 
+def resolve_gemini_image_model_candidates(model: str | None = None) -> list[str]:
+    primary = resolve_gemini_image_model(model)
+    raw = (getattr(config, "GEMINI_IMAGE_MODEL_FALLBACKS", None) or "").strip()
+    fallbacks = [part.strip() for part in raw.split(",") if part.strip()]
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for candidate in [primary, *fallbacks]:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        candidates.append(candidate)
+    return candidates
+
+
+def _max_gemini_retries() -> int:
+    try:
+        return max(1, min(int(getattr(config, "GEMINI_IMAGE_MAX_RETRIES", 3) or 3), 5))
+    except (TypeError, ValueError):
+        return 3
+
+
+def _retry_delay_sec(attempt: int) -> float:
+    index = min(max(attempt - 1, 0), len(_RETRY_DELAYS_SEC) - 1)
+    return _RETRY_DELAYS_SEC[index]
+
+
+def _parse_image_response(body: dict[str, Any], *, image_model: str, ratio: str) -> dict[str, Any] | None:
+    for candidate in body.get("candidates") or []:
+        content = candidate.get("content") or {}
+        for part in content.get("parts") or []:
+            inline = part.get("inlineData") or part.get("inline_data") or {}
+            data_b64 = inline.get("data")
+            mime = inline.get("mimeType") or inline.get("mime_type") or "image/png"
+            if data_b64:
+                return {
+                    "mime_type": mime,
+                    "data_b64": data_b64,
+                    "bytes": base64.b64decode(data_b64),
+                    "model": image_model,
+                    "aspect_ratio": ratio,
+                }
+    return None
+
+
+async def _request_gemini_image_once(
+    client: httpx.AsyncClient,
+    *,
+    api_key: str,
+    image_model: str,
+    payload: dict[str, Any],
+) -> httpx.Response:
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{image_model}:generateContent"
+    )
+    return await client.post(
+        url,
+        params={"key": api_key},
+        headers={"Content-Type": "application/json"},
+        json=payload,
+    )
+
+
 def gemini_image_configured() -> bool:
     return bool((config.GEMINI_API_KEY or "").strip())
 
@@ -84,12 +149,7 @@ async def generate_image_bytes(
     if not api_key:
         raise ValueError("GEMINI_API_KEY is not configured")
 
-    image_model = resolve_gemini_image_model(model)
     ratio = _ASPECT_MAP.get(str(aspect_ratio).strip(), "1:1")
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{image_model}:generateContent"
-    )
     payload: dict[str, Any] = {
         "contents": [
             {
@@ -103,38 +163,63 @@ async def generate_image_bytes(
         },
     }
 
+    models = resolve_gemini_image_model_candidates(model)
+    max_retries = _max_gemini_retries()
+    errors: list[str] = []
+
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(
-            url,
-            params={"key": api_key},
-            headers={"Content-Type": "application/json"},
-            json=payload,
-        )
+        for image_model in models:
+            for attempt in range(1, max_retries + 1):
+                response = await _request_gemini_image_once(
+                    client,
+                    api_key=api_key,
+                    image_model=image_model,
+                    payload=payload,
+                )
 
-    if response.status_code != 200:
-        detail = response.text[:500]
-        raise RuntimeError(
-            f"Gemini image generation failed ({response.status_code}): {detail}"
-        )
+                if response.status_code == 200:
+                    parsed = _parse_image_response(
+                        response.json(),
+                        image_model=image_model,
+                        ratio=ratio,
+                    )
+                    if parsed:
+                        if image_model != models[0]:
+                            logger.warning(
+                                "Gemini image generated with fallback model %s",
+                                image_model,
+                            )
+                        return parsed
+                    errors.append(f"{image_model}: empty image payload")
+                    break
 
-    body = response.json()
-    candidates = body.get("candidates") or []
-    for candidate in candidates:
-        content = candidate.get("content") or {}
-        for part in content.get("parts") or []:
-            inline = part.get("inlineData") or part.get("inline_data") or {}
-            data_b64 = inline.get("data")
-            mime = inline.get("mimeType") or inline.get("mime_type") or "image/png"
-            if data_b64:
-                return {
-                    "mime_type": mime,
-                    "data_b64": data_b64,
-                    "bytes": base64.b64decode(data_b64),
-                    "model": image_model,
-                    "aspect_ratio": ratio,
-                }
+                detail = response.text[:300]
+                message = f"{image_model} ({response.status_code}): {detail}"
+                if response.status_code in _RETRYABLE_STATUS and attempt < max_retries:
+                    delay = _retry_delay_sec(attempt)
+                    logger.warning(
+                        "Gemini image transient error; retrying model=%s attempt=%s/%s in %.1fs",
+                        image_model,
+                        attempt,
+                        max_retries,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
-    raise RuntimeError("Gemini returned no image data")
+                errors.append(message)
+                break
+
+    if errors:
+        joined = " | ".join(errors[:3])
+        if any("503" in err or "429" in err for err in errors):
+            raise RuntimeError(
+                "Gemini image generation is temporarily unavailable (model overloaded). "
+                f"Tried: {', '.join(models)}. Details: {joined}"
+            )
+        raise RuntimeError(f"Gemini image generation failed. Details: {joined}")
+
+    raise RuntimeError("Gemini image generation failed with no response details")
 
 
 async def generate_image_asset(

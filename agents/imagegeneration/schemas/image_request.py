@@ -133,6 +133,17 @@ class ImageGenerationRequest(BaseModel):
         purpose = str(self.purpose).lower()
         return _PURPOSE_ASPECT.get((platform, purpose), "1:1")
 
+    def resolve_scenes(self) -> list[dict[str, Any]]:
+        from agents.imagegeneration.Node.PromptBuilder import _resolve_image_scenes
+
+        return _resolve_image_scenes(
+            scenes=[scene for scene in (self.scenes or []) if isinstance(scene, dict)],
+            script=dict(self.script or {}),
+            project=dict(self.project or {}),
+            purpose=str(self.purpose).lower(),
+            max_images=int(self.max_images),
+        )
+
     def to_agent_config(self) -> dict[str, Any]:
         project = dict(self.project or {})
         company_id = (
@@ -150,7 +161,7 @@ class ImageGenerationRequest(BaseModel):
             "project": project,
             "script": dict(self.script or {}),
             "characters": list(self.characters or []),
-            "scenes": list(self.scenes or []),
+            "scenes": self.resolve_scenes(),
             "style": (self.style or "").strip() or "clean modern social graphic",
             "aspect_ratio": self.resolve_aspect_ratio(),
             "max_images": int(self.max_images),

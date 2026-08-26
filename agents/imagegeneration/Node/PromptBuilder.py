@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from agents.imagegeneration.pipeline_log import log_event
 from agents.imagegeneration.State.imagestate import ImageState
 
@@ -19,6 +21,50 @@ def _purpose_guidance(platform: str, purpose: str) -> str:
         f"{platform} feed post. Strong single-image composition, brand-safe, "
         "works as a standalone social graphic."
     )
+
+
+def _slides_to_scenes(slides: list[Any]) -> list[dict[str, Any]]:
+    scenes: list[dict[str, Any]] = []
+    for index, slide in enumerate(slides, start=1):
+        if not isinstance(slide, dict):
+            continue
+        scenes.append(
+            {
+                "scene_number": slide.get("slide_number") or slide.get("scene_number") or index,
+                "headline": slide.get("headline") or slide.get("title") or "",
+                "body_text": slide.get("body_text") or slide.get("body") or slide.get("text") or "",
+                "visual_prompt": slide.get("visual_prompt") or slide.get("image_prompt") or "",
+                "action": slide.get("action") or slide.get("body") or "",
+            }
+        )
+    return scenes
+
+
+def _resolve_image_scenes(
+    *,
+    scenes: list[dict[str, Any]],
+    script: dict[str, Any],
+    project: dict[str, Any],
+    purpose: str,
+    max_images: int,
+) -> list[dict[str, Any]]:
+    """Prefer explicit scenes; for carousels expand from script/project slides when needed."""
+    current = [scene for scene in scenes if isinstance(scene, dict)]
+    slide_sources: list[Any] = []
+    for source in (script, project):
+        rows = source.get("slides") if isinstance(source.get("slides"), list) else []
+        if rows:
+            slide_sources = rows
+            break
+
+    if slide_sources:
+        slide_scenes = _slides_to_scenes(slide_sources)
+        if purpose == "carousel" and len(current) < len(slide_scenes):
+            return slide_scenes[:max_images]
+        if not current:
+            return slide_scenes[:max_images]
+
+    return current[:max_images]
 
 
 def _scene_prompt(scene: dict, *, platform: str, purpose: str, style: str, script: dict) -> str:
@@ -60,6 +106,55 @@ def _scene_prompt(scene: dict, *, platform: str, purpose: str, style: str, scrip
     return " ".join(parts)
 
 
+def _build_jobs_from_scenes(
+    scenes: list[dict[str, Any]],
+    *,
+    platform: str,
+    purpose: str,
+    style: str,
+    script: dict[str, Any],
+    project: dict[str, Any],
+    aspect: str,
+    max_images: int,
+) -> list[dict[str, Any]]:
+    selected = _resolve_image_scenes(
+        scenes=scenes,
+        script=script,
+        project=project,
+        purpose=purpose,
+        max_images=max_images,
+    )
+    if purpose == "post" and len(selected) > 1:
+        selected = selected[:1]
+    if purpose == "story" and len(selected) > 3:
+        selected = selected[:3]
+
+    jobs: list[dict[str, Any]] = []
+    for index, scene in enumerate(selected, start=1):
+        if not isinstance(scene, dict):
+            continue
+        number = scene.get("scene_number") or index
+        prompt = _scene_prompt(
+            scene,
+            platform=platform,
+            purpose=purpose,
+            style=style,
+            script=script,
+        )
+        jobs.append(
+            {
+                "job_id": f"{platform}-{purpose}-{number}",
+                "scene_number": number,
+                "headline": scene.get("headline") or scene.get("title") or "",
+                "purpose": purpose,
+                "platform": platform,
+                "aspect_ratio": aspect,
+                "prompt": prompt,
+            }
+        )
+    return jobs
+
+
 async def PromptBuilderNode(state: ImageState) -> ImageState:
     logs = list(state.get("logs") or [])
     platform = (state.get("platform") or "instagram").lower()
@@ -68,39 +163,21 @@ async def PromptBuilderNode(state: ImageState) -> ImageState:
     aspect = state.get("aspect_ratio") or "1:1"
     max_images = int(state.get("max_images") or 8)
     script = state.get("script") or {}
+    project = state.get("project") or {}
     scenes = list(state.get("scenes") or [])
 
-    jobs: list[dict] = []
-    if scenes:
-        selected = scenes[:max_images]
-        if purpose == "post" and len(selected) > 1:
-            selected = selected[:1]
-        if purpose == "story" and len(selected) > 3:
-            selected = selected[:3]
-        for index, scene in enumerate(selected, start=1):
-            if not isinstance(scene, dict):
-                continue
-            number = scene.get("scene_number") or index
-            prompt = _scene_prompt(
-                scene,
-                platform=platform,
-                purpose=purpose,
-                style=style,
-                script=script,
-            )
-            jobs.append(
-                {
-                    "job_id": f"{platform}-{purpose}-{number}",
-                    "scene_number": number,
-                    "headline": scene.get("headline") or scene.get("title") or "",
-                    "purpose": purpose,
-                    "platform": platform,
-                    "aspect_ratio": aspect,
-                    "prompt": prompt,
-                }
-            )
-    else:
-        # Fallback: one image from script fields.
+    jobs = _build_jobs_from_scenes(
+        scenes,
+        platform=platform,
+        purpose=purpose,
+        style=style,
+        script=script,
+        project=project,
+        aspect=aspect,
+        max_images=max_images,
+    )
+
+    if not jobs:
         prompt = _scene_prompt(
             {
                 "headline": script.get("title"),
@@ -123,6 +200,16 @@ async def PromptBuilderNode(state: ImageState) -> ImageState:
                 "prompt": prompt,
             }
         )
+
+    resolved_scenes = _resolve_image_scenes(
+        scenes=scenes,
+        script=script,
+        project=project,
+        purpose=purpose,
+        max_images=max_images,
+    )
+    if purpose == "carousel" and len(jobs) == 1 and len(resolved_scenes) > 1:
+        logs.append("prompt_builder:carousel_single_slide_warning")
 
     logs.append(f"prompt_builder:{len(jobs)}:{platform}:{purpose}")
     log_event("1_prepare", "Image prompts ready", count=len(jobs), platform=platform, purpose=purpose)
