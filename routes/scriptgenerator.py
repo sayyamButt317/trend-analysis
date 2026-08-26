@@ -4,7 +4,11 @@ from fastapi import APIRouter, HTTPException, Query
 
 from agents.scriptgenerator.Invoke.script_invoke import scriptGenerationAgent
 from agents.scriptgenerator.schemas.script_request import ScriptGenerationRequest
-from db.script_storage import get_script_generation, list_script_generations
+from db.script_storage import (
+    delete_script_generation,
+    get_script_generation,
+    list_script_generations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,3 +95,39 @@ async def getScriptGeneration(company_id: str):
         "scenes": row.get("scenes") or [],
         "content_suggestion": row.get("content_suggestion") or {},
     }
+
+
+@router.delete(
+    "/results/{company_id}",
+    summary="Delete the latest saved script by company_id",
+    description=(
+        "Deletes the most recent script generation row for the given external "
+        "`company_id`, and the orphaned prompt row when nothing else references it."
+    ),
+)
+async def deleteScriptGenerationByCompany(company_id: str):
+    try:
+        return await delete_script_generation(company_id=company_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/script/{script_id}",
+    summary="Delete a saved script by script_id",
+    description=(
+        "Deletes a specific script generation row by its `script_id` "
+        "(returned in POST /script meta.script_id or GET /results/{company_id})."
+    ),
+)
+async def deleteScriptGenerationById(script_id: str):
+    try:
+        return await delete_script_generation(script_id=script_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

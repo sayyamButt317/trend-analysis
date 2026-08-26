@@ -239,3 +239,129 @@ async def list_script_generations(
         limit=limit,
         company_id=company_id,
     )
+
+
+def _resolve_script_id_sync(*, company_id: str | None = None, script_id: str | None = None) -> str:
+    client = get_supabase()
+    if script_id:
+        response = (
+            client.table(_script_table())
+            .select("id")
+            .eq("id", script_id.strip())
+            .eq("agent_type", AGENT_TYPE)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        if not rows:
+            raise LookupError(f"Script not found: {script_id}")
+        return str(rows[0]["id"])
+
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise ValueError("company_id or script_id is required")
+
+    response = (
+        client.table(_script_table())
+        .select("id")
+        .eq("company_id", company_id)
+        .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        raise LookupError(f"Script generation not found for company_id: {company_id}")
+    return str(rows[0]["id"])
+
+
+def _delete_script_sync(script_id: str) -> dict[str, Any]:
+    client = get_supabase()
+    script_table = _script_table()
+    prompts_table = _prompts_table()
+
+    existing = (
+        client.table(script_table)
+        .select("id,prompt_id,company_id,agent_type")
+        .eq("id", script_id)
+        .eq("agent_type", AGENT_TYPE)
+        .limit(1)
+        .execute()
+    )
+    rows = existing.data or []
+    if not rows:
+        raise LookupError(f"Script not found: {script_id}")
+
+    row = rows[0]
+    prompt_id = row.get("prompt_id")
+    company_id = row.get("company_id")
+
+    script_resp = (
+        client.table(script_table)
+        .delete()
+        .eq("id", script_id)
+        .eq("agent_type", AGENT_TYPE)
+        .execute()
+    )
+    if not (script_resp.data or []):
+        check = (
+            client.table(script_table)
+            .select("id")
+            .eq("id", script_id)
+            .limit(1)
+            .execute()
+        )
+        if check.data:
+            raise RuntimeError(f"Failed to delete script row: {script_id}")
+
+    deleted_prompt = False
+    if prompt_id:
+        remaining = (
+            client.table(script_table)
+            .select("id")
+            .eq("prompt_id", prompt_id)
+            .limit(1)
+            .execute()
+        )
+        if not (remaining.data or []):
+            try:
+                client.table(prompts_table).delete().eq("id", prompt_id).execute()
+                deleted_prompt = True
+            except Exception:
+                logger.warning(
+                    "Failed deleting orphaned prompt_id=%s",
+                    prompt_id,
+                    exc_info=True,
+                )
+
+    return {
+        "script_id": script_id,
+        "prompt_id": prompt_id,
+        "company_id": company_id,
+        "deleted_prompt": deleted_prompt,
+    }
+
+
+async def delete_script_generation(
+    *,
+    company_id: str | None = None,
+    script_id: str | None = None,
+) -> dict[str, Any]:
+    if not _is_storage_configured():
+        raise RuntimeError("Supabase is not configured")
+
+    resolved_id = await asyncio.to_thread(
+        _resolve_script_id_sync,
+        company_id=company_id,
+        script_id=script_id,
+    )
+    result = await asyncio.to_thread(_delete_script_sync, resolved_id)
+    logger.info(
+        "Deleted script generation script_id=%s company_id=%s prompt_id=%s prompt_deleted=%s",
+        result.get("script_id"),
+        result.get("company_id"),
+        result.get("prompt_id"),
+        result.get("deleted_prompt"),
+    )
+    return {"success": True, **result}
