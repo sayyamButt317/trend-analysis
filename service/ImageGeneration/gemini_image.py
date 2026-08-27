@@ -259,7 +259,7 @@ async def generate_image_asset(
         if not s3_configured():
             raise RuntimeError(
                 "upload_s3=true but AWS S3 is not configured "
-                "(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_REGION, AWS_S3_BUCKET_NAME)."
+                "(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET_NAME)."
             )
         uploaded = await asyncio.to_thread(
             upload_bytes_to_s3,

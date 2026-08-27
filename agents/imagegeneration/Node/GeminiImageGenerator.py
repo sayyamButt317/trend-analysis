@@ -37,7 +37,7 @@ async def GeminiImageGeneratorNode(state: ImageState) -> ImageState:
     if upload_s3 and not s3_configured():
         message = (
             "upload_s3=true but AWS S3 is not configured "
-            "(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_S3_REGION, AWS_S3_BUCKET_NAME)."
+            "(AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET_NAME)."
         )
         logs.append("gemini:skipped_no_s3")
         return {**state, "generated_images": images, "logs": logs, "error": message}
