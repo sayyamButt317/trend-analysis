@@ -241,6 +241,45 @@ async def list_script_generations(
     )
 
 
+def _list_full_runs_sync(
+    *,
+    company_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    client = get_supabase()
+    response = (
+        client.table(_script_table())
+        .select(
+            "id,prompt_id,company_id,created_at,success,status,summary,content_type,"
+            "aspect_ratio,style,duration_seconds,platform,scenes_count,characters_count,"
+            "duration_sec,project,script,characters,scenes,content_suggestion,agent_type"
+        )
+        .eq("company_id", company_id.strip())
+        .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
+        .limit(max(1, min(limit, 100)))
+        .execute()
+    )
+    return response.data or []
+
+
+async def list_script_generations_full(
+    *,
+    company_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    if not _is_storage_configured():
+        raise RuntimeError("Supabase is not configured")
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise ValueError("company_id is required")
+    return await asyncio.to_thread(
+        _list_full_runs_sync,
+        company_id=company_id,
+        limit=limit,
+    )
+
+
 def _resolve_script_id_sync(*, company_id: str | None = None, script_id: str | None = None) -> str:
     client = get_supabase()
     if script_id:

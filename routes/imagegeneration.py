@@ -5,8 +5,10 @@ from agents.imagegeneration.Invoke.image_invoke import imageGenerationAgent
 from agents.imagegeneration.schemas.image_request import ImageGenerationRequest
 from db.images_storage import (
     delete_image_generation,
+    flatten_generated_images,
     get_image_generation,
     list_image_generations,
+    list_image_generations_full,
 )
 
 logger = logging.getLogger(__name__)
@@ -94,6 +96,50 @@ async def getImageGeneration(company_id: str):
         "script": row.get("script") or {},
         "image_jobs": row.get("image_jobs") or [],
         "generated_images": row.get("generated_images") or [],
+    }
+
+
+@router.get(
+    "/company/{company_id}/images",
+    summary="Get all generated images for a company",
+    description=(
+        "Returns every saved image-generation run for this `company_id`, plus a "
+        "flattened `generated_images` list (S3 URLs) across all runs."
+    ),
+)
+async def getAllCompanyImages(
+    company_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+):
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise HTTPException(status_code=400, detail="company_id is required")
+    try:
+        runs = await list_image_generations_full(company_id=company_id, limit=limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    images = flatten_generated_images(runs)
+    return {
+        "success": True,
+        "company_id": company_id,
+        "runs_count": len(runs),
+        "images_count": len(images),
+        "runs": [
+            {
+                "images_id": row.get("id"),
+                "created_at": row.get("created_at"),
+                "status": row.get("status"),
+                "platform": row.get("platform"),
+                "purpose": row.get("purpose"),
+                "images_count": row.get("images_count"),
+                "generated_images": row.get("generated_images") or [],
+            }
+            for row in runs
+        ],
+        "generated_images": images,
     }
 
 

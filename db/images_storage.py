@@ -248,6 +248,68 @@ async def list_image_generations(
     )
 
 
+def _list_full_runs_sync(
+    *,
+    company_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    client = get_supabase()
+    response = (
+        client.table(_images_table())
+        .select(
+            "id,prompt_id,company_id,created_at,success,status,summary,platform,purpose,"
+            "aspect_ratio,style,images_count,jobs_count,duration_sec,project,script,"
+            "image_jobs,generated_images,agent_type"
+        )
+        .eq("company_id", company_id.strip())
+        .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
+        .limit(max(1, min(limit, 100)))
+        .execute()
+    )
+    return response.data or []
+
+
+async def list_image_generations_full(
+    *,
+    company_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    if not _is_storage_configured():
+        raise RuntimeError("Supabase is not configured")
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise ValueError("company_id is required")
+    return await asyncio.to_thread(
+        _list_full_runs_sync,
+        company_id=company_id,
+        limit=limit,
+    )
+
+
+def flatten_generated_images(runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Flatten generated_images across runs, tagging each with run metadata."""
+    flat: list[dict[str, Any]] = []
+    for run in runs:
+        images = run.get("generated_images") or []
+        if not isinstance(images, list):
+            continue
+        for image in images:
+            if not isinstance(image, dict):
+                continue
+            flat.append(
+                {
+                    **image,
+                    "images_id": run.get("id"),
+                    "run_created_at": run.get("created_at"),
+                    "run_platform": run.get("platform"),
+                    "run_purpose": run.get("purpose"),
+                    "company_id": run.get("company_id") or image.get("company_id"),
+                }
+            )
+    return flat
+
+
 def _resolve_images_id_sync(
     *,
     company_id: str | None = None,
