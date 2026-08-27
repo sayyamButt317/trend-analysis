@@ -1,9 +1,6 @@
 from __future__ import annotations
-
 import logging
-
 from fastapi import APIRouter, HTTPException, Query
-
 from db.content_recommendation_storage import list_content_recommendations_full
 from db.images_storage import flatten_generated_images, list_image_generations_full
 from db.script_storage import list_script_generations_full
