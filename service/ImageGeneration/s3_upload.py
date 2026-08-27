@@ -8,12 +8,19 @@ from uuid import uuid4
 from config.credential_config import config
 
 
+def resolve_aws_region() -> str:
+    return (
+        (getattr(config, "AWS_REGION", None) or "").strip()
+        or (getattr(config, "AWS_S3_REGION", None) or "").strip()
+    )
+
+
 def s3_configured() -> bool:
     return bool(
         (config.AWS_ACCESS_KEY_ID or "").strip()
         and (config.AWS_SECRET_ACCESS_KEY or "").strip()
         and (config.AWS_S3_BUCKET_NAME or "").strip()
-        and (config.AWS_REGION or "").strip()
+        and resolve_aws_region()
     )
 
 
@@ -33,7 +40,7 @@ def _s3_client():
 
     return boto3.client(
         "s3",
-        region_name=(config.AWS_REGION or "").strip(),
+        region_name=resolve_aws_region(),
         aws_access_key_id=(config.AWS_ACCESS_KEY_ID or "").strip(),
         aws_secret_access_key=(config.AWS_SECRET_ACCESS_KEY or "").strip(),
     )
@@ -58,11 +65,11 @@ def upload_bytes_to_s3(
     if not s3_configured():
         raise RuntimeError(
             "AWS S3 is not configured. Set AWS_ACCESS_KEY_ID, "
-            "AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_S3_BUCKET_NAME."
+            "AWS_SECRET_ACCESS_KEY, AWS_REGION (or AWS_S3_REGION), AWS_S3_BUCKET_NAME."
         )
 
     bucket = (config.AWS_S3_BUCKET_NAME or "").strip()
-    region = (config.AWS_REGION or "").strip()
+    region = resolve_aws_region()
     folder = (
         prefix
         if prefix is not None

@@ -128,7 +128,14 @@ class Config(BaseModel):
     )
     AWS_ACCESS_KEY_ID: str = Field(default=os.getenv("AWS_ACCESS_KEY_ID"))
     AWS_SECRET_ACCESS_KEY: str = Field(default=os.getenv("AWS_SECRET_ACCESS_KEY"))
-    AWS_REGION: str = Field(default=os.getenv("AWS_REGION"))
+    AWS_REGION: str = Field(
+        default=os.getenv("AWS_REGION") or os.getenv("AWS_S3_REGION") or "",
+        description="AWS region for S3 (preferred). Also accepts AWS_S3_REGION.",
+    )
+    AWS_S3_REGION: str = Field(
+        default=os.getenv("AWS_S3_REGION") or os.getenv("AWS_REGION") or "",
+        description="Deprecated alias for AWS_REGION (kept for back-compat).",
+    )
     AWS_S3_BUCKET_NAME: str = Field(default=os.getenv("AWS_S3_BUCKET_NAME"))
     AWS_S3_PREFIX: str = Field(
         default=os.getenv("AWS_S3_PREFIX") or "generated-images",
