@@ -68,11 +68,62 @@ class ScriptGenerationRequest(BaseModel):
     @field_validator("content_type", mode="before")
     @classmethod
     def _normalize_content_type(cls, value: Any) -> str:
-        text = str(value or "video").strip().lower()
-        if text in {"carousel", "post", "story", "static", "document", "image", "still"}:
+        text = str(value or "video").strip().lower().replace("-", "_").replace(" ", "_")
+        # Exact aliases
+        if text in {
+            "carousel",
+            "post",
+            "story",
+            "static",
+            "document",
+            "image",
+            "still",
+            "linkedin_document",
+            "linkedin_carousel",
+            "linkedin_post",
+            "instagram_carousel",
+            "instagram_post",
+            "instagram_story",
+            "facebook_post",
+            "facebook_carousel",
+            "pdf",
+            "slides",
+            "infographic",
+        }:
             return "image"
-        if text in {"video", "reel", "reels", "short", "shorts", "motion"}:
+        if text in {
+            "video",
+            "reel",
+            "reels",
+            "short",
+            "shorts",
+            "motion",
+            "instagram_reel",
+            "instagram_reels",
+            "tiktok",
+            "tiktok_video",
+            "youtube_short",
+            "youtube_shorts",
+        }:
             return "video"
+        # Compound / calendar format names, e.g. linkedin_document, ig_carousel
+        image_tokens = (
+            "document",
+            "carousel",
+            "static",
+            "still",
+            "image",
+            "slide",
+            "infographic",
+            "pdf",
+            "post",
+            "story",
+        )
+        video_tokens = ("video", "reel", "short", "motion", "tiktok")
+        if any(token in text for token in video_tokens):
+            return "video"
+        if any(token in text for token in image_tokens):
+            return "image"
         return text
 
     @field_validator("company_id")
