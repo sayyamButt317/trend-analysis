@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from agents.contentrecommendation.invoke.contentinvoke import contentRecommendationAgent
 from agents.contentrecommendation.schemas.content_request import ContentRecommendationRequest
 from db.content_recommendation_storage import (
+    delete_content_recommendation,
     get_content_recommendation,
     list_content_recommendations,
 )
@@ -96,3 +97,41 @@ async def getContentRecommendation(company_id: str):
         "content_ideas": row.get("content_ideas") or public.get("content_ideas") or [],
         "recommendation": recommendation,
     }
+
+
+@router.delete(
+    "/results/{company_id}",
+    summary="Delete the latest saved content recommendation by company_id",
+    description=(
+        "Deletes the most recent content recommendation row for the given external "
+        "`company_id`, and the orphaned prompt row when nothing else references it."
+    ),
+)
+async def deleteContentRecommendationByCompany(company_id: str):
+    try:
+        return await delete_content_recommendation(company_id=company_id)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/recommend/{content_recommendation_id}",
+    summary="Delete a saved content recommendation by id",
+    description=(
+        "Deletes a specific content recommendation row by its "
+        "`content_recommendation_id` (from POST /recommend meta or GET results)."
+    ),
+)
+async def deleteContentRecommendationById(content_recommendation_id: str):
+    try:
+        return await delete_content_recommendation(
+            content_recommendation_id=content_recommendation_id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

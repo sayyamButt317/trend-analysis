@@ -251,3 +251,137 @@ async def list_content_recommendations(
         limit=limit,
         company_id=company_id,
     )
+
+
+def _resolve_content_recommendation_id_sync(
+    *,
+    company_id: str | None = None,
+    content_recommendation_id: str | None = None,
+) -> str:
+    client = get_supabase()
+    table = _content_recommendation_table()
+
+    if content_recommendation_id:
+        response = (
+            client.table(table)
+            .select("id")
+            .eq("id", content_recommendation_id.strip())
+            .eq("agent_type", AGENT_TYPE)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        if not rows:
+            raise LookupError(f"Content recommendation not found: {content_recommendation_id}")
+        return str(rows[0]["id"])
+
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise ValueError("company_id or content_recommendation_id is required")
+
+    response = (
+        client.table(table)
+        .select("id")
+        .eq("company_id", company_id)
+        .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        raise LookupError(f"Content recommendation not found for company_id: {company_id}")
+    return str(rows[0]["id"])
+
+
+def _delete_content_recommendation_sync(content_recommendation_id: str) -> dict[str, Any]:
+    client = get_supabase()
+    table = _content_recommendation_table()
+    prompts_table = _prompts_table()
+
+    existing = (
+        client.table(table)
+        .select("id,prompt_id,company_id,agent_type")
+        .eq("id", content_recommendation_id)
+        .eq("agent_type", AGENT_TYPE)
+        .limit(1)
+        .execute()
+    )
+    rows = existing.data or []
+    if not rows:
+        raise LookupError(f"Content recommendation not found: {content_recommendation_id}")
+
+    row = rows[0]
+    prompt_id = row.get("prompt_id")
+    company_id = row.get("company_id")
+
+    delete_resp = (
+        client.table(table)
+        .delete()
+        .eq("id", content_recommendation_id)
+        .eq("agent_type", AGENT_TYPE)
+        .execute()
+    )
+    if not (delete_resp.data or []):
+        check = (
+            client.table(table)
+            .select("id")
+            .eq("id", content_recommendation_id)
+            .limit(1)
+            .execute()
+        )
+        if check.data:
+            raise RuntimeError(
+                f"Failed to delete content recommendation row: {content_recommendation_id}"
+            )
+
+    deleted_prompt = False
+    if prompt_id:
+        remaining = (
+            client.table(table)
+            .select("id")
+            .eq("prompt_id", prompt_id)
+            .limit(1)
+            .execute()
+        )
+        if not (remaining.data or []):
+            try:
+                client.table(prompts_table).delete().eq("id", prompt_id).execute()
+                deleted_prompt = True
+            except Exception:
+                logger.warning(
+                    "Failed deleting orphaned prompt_id=%s",
+                    prompt_id,
+                    exc_info=True,
+                )
+
+    return {
+        "content_recommendation_id": content_recommendation_id,
+        "prompt_id": prompt_id,
+        "company_id": company_id,
+        "deleted_prompt": deleted_prompt,
+    }
+
+
+async def delete_content_recommendation(
+    *,
+    company_id: str | None = None,
+    content_recommendation_id: str | None = None,
+) -> dict[str, Any]:
+    if not _is_storage_configured():
+        raise RuntimeError("Supabase is not configured")
+
+    resolved_id = await asyncio.to_thread(
+        _resolve_content_recommendation_id_sync,
+        company_id=company_id,
+        content_recommendation_id=content_recommendation_id,
+    )
+    result = await asyncio.to_thread(_delete_content_recommendation_sync, resolved_id)
+    logger.info(
+        "Deleted content recommendation id=%s company_id=%s prompt_id=%s prompt_deleted=%s",
+        result.get("content_recommendation_id"),
+        result.get("company_id"),
+        result.get("prompt_id"),
+        result.get("deleted_prompt"),
+    )
+    return {"success": True, **result}

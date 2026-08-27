@@ -246,3 +246,177 @@ async def list_image_generations(
         limit=limit,
         company_id=company_id,
     )
+
+
+def _resolve_images_id_sync(
+    *,
+    company_id: str | None = None,
+    images_id: str | None = None,
+) -> str:
+    client = get_supabase()
+    table = _images_table()
+
+    if images_id:
+        response = (
+            client.table(table)
+            .select("id")
+            .eq("id", images_id.strip())
+            .eq("agent_type", AGENT_TYPE)
+            .limit(1)
+            .execute()
+        )
+        rows = response.data or []
+        if not rows:
+            raise LookupError(f"Image generation not found: {images_id}")
+        return str(rows[0]["id"])
+
+    company_id = (company_id or "").strip()
+    if not company_id:
+        raise ValueError("company_id or images_id is required")
+
+    response = (
+        client.table(table)
+        .select("id")
+        .eq("company_id", company_id)
+        .eq("agent_type", AGENT_TYPE)
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    rows = response.data or []
+    if not rows:
+        raise LookupError(f"Image generation not found for company_id: {company_id}")
+    return str(rows[0]["id"])
+
+
+def _collect_s3_keys(generated_images: Any) -> tuple[list[str], str | None]:
+    keys: list[str] = []
+    bucket: str | None = None
+    if not isinstance(generated_images, list):
+        return keys, bucket
+    for item in generated_images:
+        if not isinstance(item, dict):
+            continue
+        key = item.get("s3_key") or item.get("key")
+        if key:
+            keys.append(str(key))
+        if not bucket and item.get("s3_bucket"):
+            bucket = str(item.get("s3_bucket"))
+    return keys, bucket
+
+
+def _delete_images_sync(images_id: str, *, delete_s3: bool = True) -> dict[str, Any]:
+    client = get_supabase()
+    table = _images_table()
+    prompts_table = _prompts_table()
+
+    existing = (
+        client.table(table)
+        .select("id,prompt_id,company_id,agent_type,generated_images")
+        .eq("id", images_id)
+        .eq("agent_type", AGENT_TYPE)
+        .limit(1)
+        .execute()
+    )
+    rows = existing.data or []
+    if not rows:
+        raise LookupError(f"Image generation not found: {images_id}")
+
+    row = rows[0]
+    prompt_id = row.get("prompt_id")
+    company_id = row.get("company_id")
+    s3_keys, s3_bucket = _collect_s3_keys(row.get("generated_images"))
+
+    delete_resp = (
+        client.table(table)
+        .delete()
+        .eq("id", images_id)
+        .eq("agent_type", AGENT_TYPE)
+        .execute()
+    )
+    if not (delete_resp.data or []):
+        check = (
+            client.table(table)
+            .select("id")
+            .eq("id", images_id)
+            .limit(1)
+            .execute()
+        )
+        if check.data:
+            raise RuntimeError(f"Failed to delete images row: {images_id}")
+
+    deleted_prompt = False
+    if prompt_id:
+        remaining = (
+            client.table(table)
+            .select("id")
+            .eq("prompt_id", prompt_id)
+            .limit(1)
+            .execute()
+        )
+        if not (remaining.data or []):
+            try:
+                client.table(prompts_table).delete().eq("id", prompt_id).execute()
+                deleted_prompt = True
+            except Exception:
+                logger.warning(
+                    "Failed deleting orphaned prompt_id=%s",
+                    prompt_id,
+                    exc_info=True,
+                )
+
+    s3_result: dict[str, Any] = {"deleted": 0, "failed": [], "bucket": None}
+    if delete_s3 and s3_keys:
+        try:
+            from service.ImageGeneration.s3_upload import delete_s3_objects
+
+            s3_result = delete_s3_objects(s3_keys, bucket=s3_bucket)
+        except Exception as exc:
+            logger.warning("S3 cleanup failed for images_id=%s: %s", images_id, exc)
+            s3_result = {
+                "deleted": 0,
+                "failed": s3_keys,
+                "bucket": s3_bucket,
+                "error": str(exc),
+            }
+
+    return {
+        "images_id": images_id,
+        "prompt_id": prompt_id,
+        "company_id": company_id,
+        "deleted_prompt": deleted_prompt,
+        "s3_deleted": s3_result.get("deleted", 0),
+        "s3_failed": s3_result.get("failed") or [],
+        "s3_bucket": s3_result.get("bucket"),
+    }
+
+
+async def delete_image_generation(
+    *,
+    company_id: str | None = None,
+    images_id: str | None = None,
+    delete_s3: bool = True,
+) -> dict[str, Any]:
+    if not _is_storage_configured():
+        raise RuntimeError("Supabase is not configured")
+
+    resolved_id = await asyncio.to_thread(
+        _resolve_images_id_sync,
+        company_id=company_id,
+        images_id=images_id,
+    )
+    result = await asyncio.to_thread(
+        _delete_images_sync,
+        resolved_id,
+        delete_s3=delete_s3,
+    )
+    logger.info(
+        "Deleted image generation images_id=%s company_id=%s prompt_id=%s "
+        "prompt_deleted=%s s3_deleted=%s",
+        result.get("images_id"),
+        result.get("company_id"),
+        result.get("prompt_id"),
+        result.get("deleted_prompt"),
+        result.get("s3_deleted"),
+    )
+    return {"success": True, **result}

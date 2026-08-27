@@ -3,7 +3,11 @@ import logging
 from fastapi import APIRouter, HTTPException, Query
 from agents.imagegeneration.Invoke.image_invoke import imageGenerationAgent
 from agents.imagegeneration.schemas.image_request import ImageGenerationRequest
-from db.images_storage import get_image_generation, list_image_generations
+from db.images_storage import (
+    delete_image_generation,
+    get_image_generation,
+    list_image_generations,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +19,7 @@ router = APIRouter(prefix="/image-generation", tags=["Image Generation"])
     summary="Generate still images from a script",
     description=(
         "Generate still images from a script-generator result. Pass `platform` + "
-        "`purpose` (`story` | `post` | `carousel`) plus `project` / `script` / "
+        "`purpose` (`story` | `post` | `carousel` | `reel`) plus `project` / `script` / "
         "`scenes` from POST /script-generation/script. Pass `company_id` to link "
         "the run and retrieve it later via GET /image-generation/results/{company_id}. "
         "Results are stored in SUPABASE_TABLE_IMAGES when Supabase is configured. "
@@ -91,3 +95,53 @@ async def getImageGeneration(company_id: str):
         "image_jobs": row.get("image_jobs") or [],
         "generated_images": row.get("generated_images") or [],
     }
+
+
+@router.delete(
+    "/results/{company_id}",
+    summary="Delete the latest saved image generation by company_id",
+    description=(
+        "Deletes the most recent image generation row for the given external "
+        "`company_id`, the orphaned prompt row when unused, and related S3 objects "
+        "when `s3_key` values are present. Pass `delete_s3=false` to keep S3 files."
+    ),
+)
+async def deleteImageGenerationByCompany(
+    company_id: str,
+    delete_s3: bool = Query(
+        default=True,
+        description="Also delete S3 objects referenced by generated_images.s3_key.",
+    ),
+):
+    try:
+        return await delete_image_generation(company_id=company_id, delete_s3=delete_s3)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete(
+    "/images/{images_id}",
+    summary="Delete a saved image generation by images_id",
+    description=(
+        "Deletes a specific image generation row by its `images_id` "
+        "(from POST /images meta.images_id or GET results). Also removes related "
+        "S3 objects unless `delete_s3=false`."
+    ),
+)
+async def deleteImageGenerationById(
+    images_id: str,
+    delete_s3: bool = Query(
+        default=True,
+        description="Also delete S3 objects referenced by generated_images.s3_key.",
+    ),
+):
+    try:
+        return await delete_image_generation(images_id=images_id, delete_s3=delete_s3)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc

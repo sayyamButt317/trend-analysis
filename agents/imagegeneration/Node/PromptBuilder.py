@@ -12,6 +12,11 @@ def _purpose_guidance(platform: str, purpose: str) -> str:
             f"Vertical {platform} story frame. Full-bleed, bold focal subject, "
             "safe margins for UI overlays, high contrast, mobile-first."
         )
+    if purpose == "reel":
+        return (
+            f"Vertical {platform} reel still/cover. Full-bleed 9:16 composition, "
+            "bold focal subject, high energy, mobile-first, safe margins for UI overlays."
+        )
     if purpose == "carousel":
         return (
             f"{platform} carousel slide. Clear headline space, consistent series look, "
@@ -126,7 +131,7 @@ def _build_jobs_from_scenes(
     )
     if purpose == "post" and len(selected) > 1:
         selected = selected[:1]
-    if purpose == "story" and len(selected) > 3:
+    if purpose in {"story", "reel"} and len(selected) > 3:
         selected = selected[:3]
 
     jobs: list[dict[str, Any]] = []

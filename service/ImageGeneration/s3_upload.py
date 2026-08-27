@@ -105,3 +105,32 @@ def upload_bytes_to_s3(
         "url": url,
         "s3_url": url,
     }
+
+
+def delete_s3_objects(
+    keys: list[str],
+    *,
+    bucket: str | None = None,
+) -> dict[str, Any]:
+    """Best-effort delete of one or more S3 object keys."""
+    cleaned = [str(key).strip().lstrip("/") for key in keys if str(key or "").strip()]
+    if not cleaned:
+        return {"deleted": 0, "failed": [], "bucket": None}
+    if not s3_configured():
+        return {"deleted": 0, "failed": cleaned, "bucket": None, "error": "S3 not configured"}
+
+    target_bucket = (bucket or config.AWS_S3_BUCKET_NAME or "").strip()
+    client = _s3_client()
+    deleted = 0
+    failed: list[str] = []
+    for key in cleaned:
+        try:
+            client.delete_object(Bucket=target_bucket, Key=key)
+            deleted += 1
+        except Exception:
+            failed.append(key)
+    return {
+        "deleted": deleted,
+        "failed": failed,
+        "bucket": target_bucket,
+    }

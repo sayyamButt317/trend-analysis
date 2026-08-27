@@ -3,24 +3,30 @@ from typing import Any, Literal, Optional
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 Platform = Literal["instagram", "linkedin", "facebook", "tiktok", "x", "twitter"]
-Purpose = Literal["story", "post", "carousel"]
+Purpose = Literal["story", "post", "carousel", "reel"]
 
 
 _PURPOSE_ASPECT = {
     ("instagram", "story"): "9:16",
     ("instagram", "post"): "1:1",
     ("instagram", "carousel"): "1:1",
+    ("instagram", "reel"): "9:16",
     ("linkedin", "story"): "9:16",
     ("linkedin", "post"): "1:1",
     ("linkedin", "carousel"): "1:1",
+    ("linkedin", "reel"): "9:16",
     ("facebook", "story"): "9:16",
     ("facebook", "post"): "1:1",
     ("facebook", "carousel"): "1:1",
+    ("facebook", "reel"): "9:16",
     ("tiktok", "story"): "9:16",
     ("tiktok", "post"): "9:16",
     ("tiktok", "carousel"): "9:16",
+    ("tiktok", "reel"): "9:16",
     ("x", "post"): "16:9",
+    ("x", "reel"): "9:16",
     ("twitter", "post"): "16:9",
+    ("twitter", "reel"): "9:16",
 }
 
 
@@ -65,7 +71,7 @@ class ImageGenerationRequest(BaseModel):
     platform: Platform = Field(..., description="Target social platform.")
     purpose: Purpose = Field(
         ...,
-        description="Content format purpose: story, post, or carousel.",
+        description="Content format purpose: story, post, carousel, or reel.",
     )
     project: dict[str, Any] = Field(default_factory=dict)
     script: dict[str, Any] = Field(default_factory=dict)
@@ -111,6 +117,20 @@ class ImageGenerationRequest(BaseModel):
             return None
         text = str(value).strip()
         return text or None
+
+    @field_validator("purpose", mode="before")
+    @classmethod
+    def _normalize_purpose(cls, value: Any) -> str:
+        text = str(value or "post").strip().lower()
+        if text in {"reel", "reels", "short", "shorts", "motion", "video"}:
+            return "reel"
+        if text in {"story", "stories"}:
+            return "story"
+        if text in {"carousel", "carousels", "slides"}:
+            return "carousel"
+        if text in {"post", "feed", "image", "static"}:
+            return "post"
+        return text
 
     @model_validator(mode="after")
     def _require_visual_source(self) -> "ImageGenerationRequest":
