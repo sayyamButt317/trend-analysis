@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-import logging
 import re
 from functools import lru_cache
 from typing import Any
 from uuid import uuid4
 
 from config.credential_config import config
-
-logger = logging.getLogger(__name__)
 
 
 def s3_configured() -> bool:
@@ -85,30 +82,13 @@ def upload_bytes_to_s3(
         key = f"{key}_{unique}"
 
     client = _s3_client()
-    extra: dict[str, Any] = {
-        "ContentType": content_type or "application/octet-stream",
-        "CacheControl": "public, max-age=31536000",
-    }
-    # Optional public ACL — ignored/fails on buckets with ACLs disabled.
-    try:
-        client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=data,
-            ACL="public-read",
-            **extra,
-        )
-    except Exception as acl_exc:
-        logger.warning(
-            "S3 public-read ACL failed (%s); uploading without ACL",
-            acl_exc,
-        )
-        client.put_object(
-            Bucket=bucket,
-            Key=key,
-            Body=data,
-            **extra,
-        )
+    client.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=data,
+        ContentType=content_type or "application/octet-stream",
+        CacheControl="public, max-age=31536000",
+    )
 
     url = build_s3_object_url(bucket=bucket, region=region, key=key)
     return {
